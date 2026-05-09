@@ -26,3 +26,4 @@ dist-ssr
 *.bundle
 edumind.bundle
 *.bundle.*
+.env*.local
