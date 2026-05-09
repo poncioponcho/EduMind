@@ -6,11 +6,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,14 +60,14 @@ type WSMessage struct {
 // ===== Agent 状态 =====
 
 type AgentState struct {
-	Type      AgentType   `json:"type"`
-	Name      string      `json:"name"`
-	Status    AgentStatus `json:"status"`
-	Icon      string      `json:"icon"`
-	Color     string      `json:"color"`
-	Description string   `json:"description"`
-	LastActive int64      `json:"lastActive"`
-	TaskCount  int        `json:"taskCount"`
+	Type        AgentType   `json:"type"`
+	Name        string      `json:"name"`
+	Status      AgentStatus `json:"status"`
+	Icon        string      `json:"icon"`
+	Color       string      `json:"color"`
+	Description string      `json:"description"`
+	LastActive  int64       `json:"lastActive"`
+	TaskCount   int         `json:"taskCount"`
 }
 
 // ===== Agent 任务 =====
@@ -120,33 +124,179 @@ type DialogState struct {
 	StepIndex      int           `json:"stepIndex"`
 	History        []string      `json:"history"`
 	StartedAt      time.Time     `json:"startedAt"`
+	LastActiveAt   time.Time     `json:"lastActiveAt"`
 }
+
+type DiagnosisRequest struct {
+	UserID  string                   `json:"userId" binding:"required"`
+	Answers []map[string]interface{} `json:"answers"`
+}
+
+type TeachingRequest struct {
+	UserID         string `json:"userId" binding:"required"`
+	Message        string `json:"message" binding:"required"`
+	KnowledgePoint string `json:"knowledgePoint"`
+}
+
+type PathRequest struct {
+	UserID    string                 `json:"userId" binding:"required"`
+	Diagnosis map[string]interface{} `json:"diagnosis"`
+}
+
+type ReportRequest struct {
+	UserID string                 `json:"userId" binding:"required"`
+	Input  map[string]interface{} `json:"input"`
+}
+
+type ChainRequest struct {
+	UserID string                 `json:"userId" binding:"required"`
+	Input  map[string]interface{} `json:"input"`
+}
+
+type WSClient struct {
+	Conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (c *WSClient) WriteJSON(v interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Conn.WriteJSON(v)
+}
+
+func (c *WSClient) Close() error {
+	return c.Conn.Close()
+}
+
+type RateLimiter struct {
+	visitors map[string]*visitorInfo
+	mu       sync.RWMutex
+	limit    int
+	window   time.Duration
+}
+
+type visitorInfo struct {
+	count   int
+	resetAt time.Time
+}
+
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	rl := &RateLimiter{
+		visitors: make(map[string]*visitorInfo),
+		limit:    limit,
+		window:   window,
+	}
+	go rl.cleanupLoop()
+	return rl
+}
+
+func (rl *RateLimiter) Allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	info, exists := rl.visitors[key]
+	if !exists || now.After(info.resetAt) {
+		rl.visitors[key] = &visitorInfo{count: 1, resetAt: now.Add(rl.window)}
+		return true
+	}
+
+	if info.count >= rl.limit {
+		return false
+	}
+
+	info.count++
+	return true
+}
+
+func (rl *RateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		rl.mu.Lock()
+		now := time.Now()
+		for key, info := range rl.visitors {
+			if now.After(info.resetAt) {
+				delete(rl.visitors, key)
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+var allowedOrigins []string
+
+func initAllowedOrigins() {
+	envOrigins := os.Getenv("ALLOWED_ORIGINS")
+	if envOrigins != "" {
+		allowedOrigins = strings.Split(envOrigins, ",")
+	} else {
+		allowedOrigins = []string{
+			"http://localhost:3000",
+			"http://localhost:5173",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:5173",
+		}
+	}
+}
+
+func isOriginAllowed(origin string) bool {
+	if len(allowedOrigins) == 0 {
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" {
+		return true
+	}
+	return false
+}
+
+const (
+	maxMessageLength   = 2000
+	maxHistorySize     = 20
+	dialogStateTTL     = 2 * time.Hour
+	contextStoreTTL    = 1 * time.Hour
+	wsPongWait         = 60 * time.Second
+	wsPingPeriod       = (wsPongWait * 9) / 10
+	wsMaxMessageSize   = 4096
+	maxRequestBodySize = 1024 * 1024
+)
 
 // ===== Agent 调度器（核心）=====
 // 使用 goroutine + channel 实现轻量并发
 
+type contextEntry struct {
+	data      map[string]interface{}
+	createdAt time.Time
+}
+
 type AgentOrchestrator struct {
-	// Agent 状态管理
 	agents map[AgentType]*AgentState
 	mu     sync.RWMutex
 
-	// 任务队列（每个Agent一个channel）
 	taskQueues map[AgentType]chan AgentTask
 
-	// WebSocket 广播channel
 	broadcast chan WSMessage
 
-	// 客户端管理
-	clients map[*websocket.Conn]bool
-	wsMu    sync.RWMutex
+	wsClients map[*WSClient]bool
+	wsMu      sync.RWMutex
 
-	// 上下文传递（Agent间通信）
-	contextStore map[string]map[string]interface{}
+	contextStore map[string]*contextEntry
 	ctxMu        sync.RWMutex
 
-	// 教学对话状态（每个用户+知识点一个状态）
 	dialogStates map[string]*DialogState
 	dialogMu     sync.RWMutex
+
+	rateLimiter  *RateLimiter
+	requestCount atomic.Int64
 }
 
 // NewAgentOrchestrator 创建调度器
@@ -193,22 +343,22 @@ func NewAgentOrchestrator() *AgentOrchestrator {
 			Evaluator:     make(chan AgentTask, 100),
 		},
 		broadcast:    make(chan WSMessage, 256),
-		clients:      make(map[*websocket.Conn]bool),
-		contextStore: make(map[string]map[string]interface{}),
+		wsClients:    make(map[*WSClient]bool),
+		contextStore: make(map[string]*contextEntry),
 		dialogStates: make(map[string]*DialogState),
+		rateLimiter:  NewRateLimiter(60, time.Minute),
 	}
 }
 
 // Start 启动所有Agent工作goroutine
 func (o *AgentOrchestrator) Start() {
-	// 启动4个Agent工作goroutine
 	go o.agentWorker(Diagnostician, o.handleDiagnosis)
 	go o.agentWorker(Tutor, o.handleTeaching)
 	go o.agentWorker(Planner, o.handlePlanning)
 	go o.agentWorker(Evaluator, o.handleEvaluation)
 
-	// 启动广播goroutine
 	go o.broadcastWorker()
+	go o.cleanupStaleStates()
 
 	log.Println("Agent调度器已启动，4个Agent工作goroutine运行中")
 }
@@ -219,23 +369,26 @@ func (o *AgentOrchestrator) agentWorker(agentType AgentType, handler func(AgentT
 	log.Printf("[%s] Agent工作goroutine启动\n", agentType)
 
 	for task := range o.taskQueues[agentType] {
-		// 更新状态为运行中
 		o.updateAgentStatus(agentType, Running)
 
-		// 模拟处理时间（实际场景中这里是AI推理）
 		time.Sleep(time.Duration(500+rand.Intn(1500)) * time.Millisecond)
 
-		// 执行任务
-		result := handler(task)
+		var result TaskResult
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[%s] panic recovered: %v", agentType, r)
+					result = TaskResult{Success: false, Error: fmt.Sprintf("内部处理错误: %v", r)}
+				}
+			}()
+			result = handler(task)
+		}()
 
-		// 发送结果
 		task.Result <- result
 
-		// 更新状态
 		o.updateAgentStatus(agentType, Idle)
 		o.incrementTaskCount(agentType)
 
-		// 广播Agent消息
 		if result.Success {
 			o.broadcast <- WSMessage{
 				Type:      "agent_message",
@@ -328,40 +481,47 @@ func (o *AgentOrchestrator) SubmitChain(userID string, input map[string]interfac
 
 func (o *AgentOrchestrator) handleDiagnosis(task AgentTask) TaskResult {
 	answers, ok := task.Input["answers"].([]interface{})
-	if !ok {
-		return TaskResult{Success: false, Error: "缺少答题数据"}
+	if !ok || len(answers) == 0 {
+		return TaskResult{Success: false, Error: "缺少答题数据或答题数据为空"}
 	}
 
-	// 模拟诊断分析
 	weakPoints := []string{}
 	strongPoints := []string{}
-	scores := map[string]float64{}
+	kpCorrect := map[string]int{}
+	kpTotal := map[string]int{}
 
-	// 简单的诊断逻辑
 	correctCount := 0
-	for i, ans := range answers {
-		isCorrect := ans.(map[string]interface{})["correct"].(bool)
-		kp := ans.(map[string]interface{})["knowledgePoint"].(string)
+	for _, ans := range answers {
+		ansMap, ok := ans.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		isCorrect, _ := ansMap["correct"].(bool)
+		kp, _ := ansMap["knowledgePoint"].(string)
+		if kp == "" {
+			continue
+		}
 
+		kpTotal[kp]++
 		if isCorrect {
 			correctCount++
-			if !contains(strongPoints, kp) {
-				strongPoints = append(strongPoints, kp)
-			}
-		} else {
+			kpCorrect[kp]++
+		}
+	}
+
+	scores := map[string]float64{}
+	for kp, total := range kpTotal {
+		correct := kpCorrect[kp]
+		scores[kp] = float64(correct) / float64(total) * 100
+		if scores[kp] < 60 {
 			if !contains(weakPoints, kp) {
 				weakPoints = append(weakPoints, kp)
 			}
+		} else {
+			if !contains(strongPoints, kp) {
+				strongPoints = append(strongPoints, kp)
+			}
 		}
-
-		// 更新知识点得分
-		if _, exists := scores[kp]; !exists {
-			scores[kp] = 0
-		}
-		if isCorrect {
-			scores[kp] += 100.0 / float64(len(answers))
-		}
-		_ = i
 	}
 
 	overall := "intermediate"
@@ -371,6 +531,11 @@ func (o *AgentOrchestrator) handleDiagnosis(task AgentTask) TaskResult {
 		overall = "advanced"
 	}
 
+	accuracy := 0.0
+	if len(answers) > 0 {
+		accuracy = float64(correctCount) / float64(len(answers))
+	}
+
 	return TaskResult{
 		Success: true,
 		Data: map[string]interface{}{
@@ -378,25 +543,62 @@ func (o *AgentOrchestrator) handleDiagnosis(task AgentTask) TaskResult {
 			"strongPoints": strongPoints,
 			"overallLevel": overall,
 			"detailScores": scores,
-			"accuracy":     float64(correctCount) / float64(len(answers)),
+			"accuracy":     accuracy,
 		},
 	}
 }
 
 func (o *AgentOrchestrator) handleTeaching(task AgentTask) TaskResult {
 	message, ok := task.Input["message"].(string)
-	if !ok {
+	if !ok || strings.TrimSpace(message) == "" {
 		return TaskResult{Success: false, Error: "缺少消息内容"}
 	}
 
+	if len([]rune(message)) > maxMessageLength {
+		return TaskResult{Success: false, Error: fmt.Sprintf("消息长度超过限制（最大%d字符）", maxMessageLength)}
+	}
+
 	knowledgePoint, _ := task.Input["knowledgePoint"].(string)
+	if knowledgePoint == "" {
+		knowledgePoint = "limit"
+	}
 	userID := task.UserID
+
+	m := strings.ToLower(strings.TrimSpace(message))
+	if m == "重新开始" || m == "restart" || m == "reset" {
+		o.dialogMu.Lock()
+		key := o.getDialogKey(userID, knowledgePoint)
+		delete(o.dialogStates, key)
+		o.dialogMu.Unlock()
+
+		state := o.getOrCreateDialogState(userID, knowledgePoint)
+		steps := knowledgePhaseContent(knowledgePoint)
+		response := "好的，让我们重新开始学习「" + getKnowledgePointName(knowledgePoint) + "」！\n\n"
+		if len(steps) > 0 {
+			response += steps[0].Content
+			if steps[0].SocraticProbe != "" {
+				response += "\n\n🤔 " + steps[0].SocraticProbe
+			}
+		}
+		o.saveDialogState(state)
+		return TaskResult{
+			Success: true,
+			Data: map[string]interface{}{
+				"response":       response,
+				"knowledgePoint": knowledgePoint,
+				"phase":          state.CurrentPhase,
+				"intent":         "restart",
+				"isSocratic":     true,
+			},
+		}
+	}
 
 	intent := detectIntent(message)
 	state := o.getOrCreateDialogState(userID, knowledgePoint)
 
 	response := o.generatePhaseBasedResponse(state, intent, message, knowledgePhaseContent(knowledgePoint))
 
+	state.LastActiveAt = time.Now()
 	o.saveDialogState(state)
 
 	return TaskResult{
@@ -561,11 +763,11 @@ func (o *AgentOrchestrator) handleEvaluation(task AgentTask) TaskResult {
 	return TaskResult{
 		Success: true,
 		Data: map[string]interface{}{
-			"overallScore":        75 + rand.Intn(20),
-			"questionsAnswered":   50 + rand.Intn(50),
-			"accuracy":            0.7 + float64(rand.Intn(25))/100,
-			"timeSpent":           120 + rand.Intn(200),
-			"masteryLevel":        0.6 + float64(rand.Intn(35))/100,
+			"overallScore":      75 + rand.Intn(20),
+			"questionsAnswered": 50 + rand.Intn(50),
+			"accuracy":          0.7 + float64(rand.Intn(25))/100,
+			"timeSpent":         120 + rand.Intn(200),
+			"masteryLevel":      0.6 + float64(rand.Intn(35))/100,
 			"suggestions": []string{
 				"建议加强极限与连续的基础概念练习",
 				"导数应用部分掌握良好，可继续深入学习",
@@ -633,17 +835,17 @@ func (o *AgentOrchestrator) setContext(userID string, key string, value interfac
 	defer o.ctxMu.Unlock()
 
 	if o.contextStore[userID] == nil {
-		o.contextStore[userID] = make(map[string]interface{})
+		o.contextStore[userID] = &contextEntry{data: make(map[string]interface{}), createdAt: time.Now()}
 	}
-	o.contextStore[userID][key] = value
+	o.contextStore[userID].data[key] = value
 }
 
 func (o *AgentOrchestrator) getContext(userID string, key string) (interface{}, bool) {
 	o.ctxMu.RLock()
 	defer o.ctxMu.RUnlock()
 
-	if ctx, ok := o.contextStore[userID]; ok {
-		val, exists := ctx[key]
+	if entry, ok := o.contextStore[userID]; ok {
+		val, exists := entry.data[key]
 		return val, exists
 	}
 	return nil, false
@@ -653,24 +855,29 @@ func (o *AgentOrchestrator) getContext(userID string, key string) (interface{}, 
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许跨域
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		return isOriginAllowed(origin)
 	},
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
 }
 
 func (o *AgentOrchestrator) broadcastWorker() {
 	for msg := range o.broadcast {
 		o.wsMu.RLock()
-		clients := make([]*websocket.Conn, 0, len(o.clients))
-		for client := range o.clients {
+		clients := make([]*WSClient, 0, len(o.wsClients))
+		for client := range o.wsClients {
 			clients = append(clients, client)
 		}
 		o.wsMu.RUnlock()
 
 		for _, client := range clients {
 			if err := client.WriteJSON(msg); err != nil {
-				// 移除失败的连接
 				o.wsMu.Lock()
-				delete(o.clients, client)
+				delete(o.wsClients, client)
 				o.wsMu.Unlock()
 				client.Close()
 			}
@@ -684,27 +891,57 @@ func (o *AgentOrchestrator) handleWebSocket(c *gin.Context) {
 		log.Println("WebSocket升级失败:", err)
 		return
 	}
-	defer conn.Close()
+
+	client := &WSClient{Conn: conn}
 
 	o.wsMu.Lock()
-	o.clients[conn] = true
+	o.wsClients[client] = true
 	o.wsMu.Unlock()
 
-	// 发送初始Agent状态
 	states := o.GetAgentStates()
-	conn.WriteJSON(WSMessage{
+	client.WriteJSON(WSMessage{
 		Type:      "agent_status",
 		Payload:   states,
 		Timestamp: time.Now().UnixMilli(),
 	})
 
-	// 保持连接
+	conn.SetReadLimit(wsMaxMessageSize)
+	conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsPongWait))
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				client.mu.Lock()
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				client.mu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	defer func() {
+		close(done)
+		client.Close()
+		o.wsMu.Lock()
+		delete(o.wsClients, client)
+		o.wsMu.Unlock()
+	}()
+
 	for {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
-			o.wsMu.Lock()
-			delete(o.clients, conn)
-			o.wsMu.Unlock()
 			break
 		}
 	}
@@ -826,6 +1063,9 @@ func (o *AgentOrchestrator) generatePhaseBasedResponse(state *DialogState, inten
 
 func (o *AgentOrchestrator) handleConfused(state *DialogState, steps []TeachingStep) string {
 	currentStep := o.getCurrentStep(steps, state)
+	if currentStep == nil {
+		return "抱歉，当前没有可用的教学内容。输入「重新开始」重置学习进度。"
+	}
 	switch state.CurrentPhase {
 	case PhaseIntro:
 		return "没关系，我们从头来。" + currentStep.Content + "\n\n💡 " + currentStep.SocraticProbe
@@ -868,6 +1108,9 @@ func (o *AgentOrchestrator) handleContinue(state *DialogState, steps []TeachingS
 
 func (o *AgentOrchestrator) handleStudentAnswer(state *DialogState, message string, steps []TeachingStep) string {
 	currentStep := o.getCurrentStep(steps, state)
+	if currentStep == nil {
+		return "收到你的想法！输入「继续」进入下一环节。"
+	}
 	if state.CurrentPhase == PhasePractice {
 		return evaluateStudentAnswer(message, currentStep)
 	}
@@ -883,6 +1126,15 @@ func (o *AgentOrchestrator) handleDefault(state *DialogState, message string, st
 }
 
 func (o *AgentOrchestrator) advanceToNextPhase(state *DialogState, steps []TeachingStep) string {
+	return o.advanceToNextPhaseWithDepth(state, steps, 0)
+}
+
+func (o *AgentOrchestrator) advanceToNextPhaseWithDepth(state *DialogState, steps []TeachingStep, depth int) string {
+	if depth > 5 {
+		state.CurrentPhase = PhaseSummary
+		return "🎉 本节课程已全部学完！你可以返回诊断页面测试自己的掌握程度，或者选择其他知识点继续学习。"
+	}
+
 	phaseOrder := []TeachingPhase{PhaseIntro, PhaseDefinition, PhaseExample, PhasePractice, PhaseSummary}
 
 	nextIdx := -1
@@ -908,7 +1160,7 @@ func (o *AgentOrchestrator) advanceToNextPhase(state *DialogState, steps []Teach
 
 	step := findStepByPhase(steps, nextPhase)
 	if step == nil {
-		return o.advanceToNextPhase(state, steps)
+		return o.advanceToNextPhaseWithDepth(state, steps, depth+1)
 	}
 
 	phaseLabels := map[TeachingPhase]string{
@@ -961,18 +1213,18 @@ func indexOfPhase(steps []TeachingStep, phase TeachingPhase) int {
 
 func getKnowledgePointName(kp string) string {
 	names := map[string]string{
-		"limit":               "极限",
-		"derivative":          "导数",
-		"chain_rule":          "链式法则",
-		"indefinite_integral":  "不定积分",
-		"definite_integral":    "定积分",
-		"multiple_integral":    "重积分",
-		"series":              "级数",
-		"ode":                 "微分方程",
-		"partial_derivative":   "偏导数",
-		"continuity":          "连续性",
-		"integration_by_parts": "分部积分",
-		"taylor":              "泰勒公式",
+		"limit":                  "极限",
+		"derivative":             "导数",
+		"chain_rule":             "链式法则",
+		"indefinite_integral":    "不定积分",
+		"definite_integral":      "定积分",
+		"multiple_integral":      "重积分",
+		"series":                 "级数",
+		"ode":                    "微分方程",
+		"partial_derivative":     "偏导数",
+		"continuity":             "连续性",
+		"integration_by_parts":   "分部积分",
+		"taylor":                 "泰勒公式",
 		"application_derivative": "导数应用",
 		"application_integral":   "积分应用",
 	}
@@ -1085,146 +1337,156 @@ func contains(slice []string, item string) bool {
 // ===== HTTP 路由 =====
 
 func main() {
-	// 初始化随机数
-	rand.Seed(time.Now().UnixNano())
+	_ = rand.New(rand.NewSource(time.Now().UnixNano()))
+	initAllowedOrigins()
 
-	// 创建调度器
 	orchestrator := NewAgentOrchestrator()
 	orchestrator.Start()
 
-	// 设置Gin
 	r := gin.Default()
 	r.Use(corsMiddleware())
+	r.Use(rateLimitMiddleware(orchestrator))
+	r.Use(securityHeadersMiddleware())
 
-	// API路由
 	api := r.Group("/api")
 	{
-		// Agent状态
 		api.GET("/agents/status", func(c *gin.Context) {
 			c.JSON(200, orchestrator.GetAgentStates())
 		})
 
-		// 提交诊断任务
 		api.POST("/diagnosis/submit", func(c *gin.Context) {
-			var input map[string]interface{}
-			if err := c.BindJSON(&input); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
+			var req DiagnosisRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "请求格式错误"})
 				return
 			}
 
-			result := <-orchestrator.SubmitTask(AgentTask{
+			answersRaw, _ := json.Marshal(req.Answers)
+			var answers []interface{}
+			json.Unmarshal(answersRaw, &answers)
+
+			resultCh := orchestrator.SubmitTask(AgentTask{
 				ID:     "diag_" + time.Now().Format("20060102150405"),
 				Type:   Diagnostician,
-				UserID: input["userId"].(string),
-				Input:  input,
+				UserID: req.UserID,
+				Input:  map[string]interface{}{"userId": req.UserID, "answers": answers},
 			})
 
-			if !result.Success {
-				c.JSON(500, gin.H{"error": result.Error})
-				return
+			select {
+			case result := <-resultCh:
+				if !result.Success {
+					c.JSON(500, gin.H{"error": result.Error})
+					return
+				}
+				c.JSON(200, result.Data)
+			case <-time.After(30 * time.Second):
+				c.JSON(504, gin.H{"error": "请求超时，请稍后重试"})
 			}
-
-			c.JSON(200, result.Data)
 		})
 
-		// 提交教学任务
 		api.POST("/teaching/message", func(c *gin.Context) {
-			var input map[string]interface{}
-			if err := c.BindJSON(&input); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
+			var req TeachingRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "请求格式错误"})
 				return
 			}
 
-			result := <-orchestrator.SubmitTask(AgentTask{
+			resultCh := orchestrator.SubmitTask(AgentTask{
 				ID:     "teach_" + time.Now().Format("20060102150405"),
 				Type:   Tutor,
-				UserID: input["userId"].(string),
-				Input:  input,
+				UserID: req.UserID,
+				Input:  map[string]interface{}{"userId": req.UserID, "message": req.Message, "knowledgePoint": req.KnowledgePoint},
 			})
 
-			if !result.Success {
-				c.JSON(500, gin.H{"error": result.Error})
-				return
+			select {
+			case result := <-resultCh:
+				if !result.Success {
+					c.JSON(500, gin.H{"error": result.Error})
+					return
+				}
+				c.JSON(200, result.Data)
+			case <-time.After(30 * time.Second):
+				c.JSON(504, gin.H{"error": "请求超时，请稍后重试"})
 			}
-
-			c.JSON(200, result.Data)
 		})
 
-		// 生成学习路径
 		api.POST("/path/generate", func(c *gin.Context) {
-			var input map[string]interface{}
-			if err := c.BindJSON(&input); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
+			var req PathRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "请求格式错误"})
 				return
 			}
 
-			result := <-orchestrator.SubmitTask(AgentTask{
+			resultCh := orchestrator.SubmitTask(AgentTask{
 				ID:     "plan_" + time.Now().Format("20060102150405"),
 				Type:   Planner,
-				UserID: input["userId"].(string),
-				Input:  input,
+				UserID: req.UserID,
+				Input:  map[string]interface{}{"userId": req.UserID, "diagnosis": req.Diagnosis},
 			})
 
-			if !result.Success {
-				c.JSON(500, gin.H{"error": result.Error})
-				return
+			select {
+			case result := <-resultCh:
+				if !result.Success {
+					c.JSON(500, gin.H{"error": result.Error})
+					return
+				}
+				c.JSON(200, result.Data)
+			case <-time.After(30 * time.Second):
+				c.JSON(504, gin.H{"error": "请求超时，请稍后重试"})
 			}
-
-			c.JSON(200, result.Data)
 		})
 
-		// 生成评估报告
 		api.POST("/report/generate", func(c *gin.Context) {
-			var input map[string]interface{}
-			if err := c.BindJSON(&input); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
+			var req ReportRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "请求格式错误"})
 				return
 			}
 
-			result := <-orchestrator.SubmitTask(AgentTask{
+			resultCh := orchestrator.SubmitTask(AgentTask{
 				ID:     "eval_" + time.Now().Format("20060102150405"),
 				Type:   Evaluator,
-				UserID: input["userId"].(string),
-				Input:  input,
+				UserID: req.UserID,
+				Input:  map[string]interface{}{"userId": req.UserID},
 			})
 
-			if !result.Success {
-				c.JSON(500, gin.H{"error": result.Error})
-				return
+			select {
+			case result := <-resultCh:
+				if !result.Success {
+					c.JSON(500, gin.H{"error": result.Error})
+					return
+				}
+				c.JSON(200, result.Data)
+			case <-time.After(30 * time.Second):
+				c.JSON(504, gin.H{"error": "请求超时，请稍后重试"})
 			}
-
-			c.JSON(200, result.Data)
 		})
 
-		// 执行完整Agent链
 		api.POST("/chain/execute", func(c *gin.Context) {
-			var input map[string]interface{}
-			if err := c.BindJSON(&input); err != nil {
-				c.JSON(400, gin.H{"error": err.Error()})
+			var req ChainRequest
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(400, gin.H{"error": "请求格式错误"})
 				return
 			}
 
-			result := <-orchestrator.SubmitChain(
-				input["userId"].(string),
-				input,
-			)
+			resultCh := orchestrator.SubmitChain(req.UserID, req.Input)
 
-			if !result.Success {
-				c.JSON(500, gin.H{"error": result.Error})
-				return
+			select {
+			case result := <-resultCh:
+				if !result.Success {
+					c.JSON(500, gin.H{"error": result.Error})
+					return
+				}
+				c.JSON(200, result.Data)
+			case <-time.After(60 * time.Second):
+				c.JSON(504, gin.H{"error": "请求超时，请稍后重试"})
 			}
-
-			c.JSON(200, result.Data)
 		})
 	}
 
-	// WebSocket路由
 	r.GET("/ws/agents", orchestrator.handleWebSocket)
-
-	// 静态文件
 	r.Static("/", "./static")
 
-	// 启动服务
 	log.Println("EduMind Agent调度网关启动于 :8080")
 	log.Println("API文档:")
 	log.Println("  GET  /api/agents/status    - Agent状态")
@@ -1238,12 +1500,18 @@ func main() {
 	r.Run(":8080")
 }
 
-// CORS中间件
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := c.Request.Header.Get("Origin")
+		if origin != "" && isOriginAllowed(origin) {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Vary", "Origin")
+		} else if origin == "" {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -1251,5 +1519,53 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func rateLimitMiddleware(o *AgentOrchestrator) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		if !o.rateLimiter.Allow(ip) {
+			c.JSON(429, gin.H{"error": "请求过于频繁，请稍后再试"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:")
+		c.Writer.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		c.Next()
+	}
+}
+
+func (o *AgentOrchestrator) cleanupStaleStates() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		now := time.Now()
+
+		o.dialogMu.Lock()
+		for key, state := range o.dialogStates {
+			if !state.LastActiveAt.IsZero() && now.Sub(state.LastActiveAt) > dialogStateTTL {
+				delete(o.dialogStates, key)
+			}
+		}
+		o.dialogMu.Unlock()
+
+		o.ctxMu.Lock()
+		for userID, entry := range o.contextStore {
+			if len(entry.data) == 0 || now.Sub(entry.createdAt) > contextStoreTTL {
+				delete(o.contextStore, userID)
+			}
+		}
+		o.ctxMu.Unlock()
 	}
 }

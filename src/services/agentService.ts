@@ -13,7 +13,6 @@ import type {
 } from '@/types';
 import {
   getKnowledgePoints,
-  getKnowledgePointById,
   getLearningRecords,
   initLearningRecords,
   logAgentMessage,
@@ -127,7 +126,7 @@ export async function runDiagnosis(answers: { questionId: string; knowledgePoint
   });
 
   Object.entries(kpCorrect).forEach(([kpId, stats]) => {
-    const score = (stats.correct / stats.total) * 100;
+    const score = stats.total > 0 ? (stats.correct / stats.total) * 100 : 0;
     scores[kpId] = score;
     const kp = knowledgePoints.find(k => k.id === kpId);
     if (!kp) return;
@@ -191,6 +190,22 @@ interface DialogState {
 }
 
 const dialogStates: Map<string, DialogState> = new Map();
+
+const MAX_DIALOG_STATES = 50;
+const MAX_HISTORY_SIZE = 20;
+
+function cleanupDialogStates() {
+  if (dialogStates.size > MAX_DIALOG_STATES) {
+    const entries = Array.from(dialogStates.entries());
+    entries.sort((a, b) => {
+      const aTime = a[1].history.length > 0 ? 0 : 1;
+      const bTime = b[1].history.length > 0 ? 0 : 1;
+      return aTime - bTime;
+    });
+    const toDelete = entries.slice(0, dialogStates.size - MAX_DIALOG_STATES + 10);
+    toDelete.forEach(([key]) => dialogStates.delete(key));
+  }
+}
 
 const PHASE_ORDER: TeachingPhase[] = ['intro', 'definition', 'example', 'practice', 'summary'];
 
@@ -300,7 +315,7 @@ const TEACHING_CONTENT: Record<string, TeachingStep[]> = {
 function detectIntent(message: string): UserIntent {
   const m = message.toLowerCase().trim();
 
-  const keywords: Record<UserIntent, string[]> = {
+  const keywords: Partial<Record<UserIntent, string[]>> = {
     want_definition: ['定义', '什么是', '概念', '介绍一下', 'meaning', 'definition', 'explain', '解释'],
     want_example: ['例子', '怎么算', '演示', '举个例子', 'example', 'show me', '具体'],
     continue: ['继续', '下一步', '然后呢', '懂了', '明白了', 'ok', 'next', '继续说', 'go on', 'yes', '好'],
@@ -308,6 +323,10 @@ function detectIntent(message: string): UserIntent {
     student_answer: ['答案是', '结果是', '我认为', '我觉得是', '应该是', 'my answer', '等于'],
     greeting: ['你好', 'hi', 'hello', '开始', 'start'],
   };
+
+  if (m === '重新开始' || m === 'restart' || m === 'reset') {
+    return 'continue';
+  }
 
   let matched: UserIntent = 'unknown';
   let maxMatches = 0;
@@ -348,7 +367,11 @@ function indexOfPhase(steps: TeachingStep[], phase: TeachingPhase): number {
   return steps.findIndex(s => s.phase === phase);
 }
 
-function advanceToNextPhase(state: DialogState, steps: TeachingStep[]): string {
+function advanceToNextPhase(state: DialogState, steps: TeachingStep[], depth: number = 0): string {
+  if (depth > PHASE_ORDER.length) {
+    return '🎉 本节课程已全部学完！你可以返回诊断页面测试自己的掌握程度，或者选择其他知识点继续学习。';
+  }
+
   const currentIdx = PHASE_ORDER.indexOf(state.currentPhase);
   const nextIdx = currentIdx + 1;
 
@@ -365,7 +388,7 @@ function advanceToNextPhase(state: DialogState, steps: TeachingStep[]): string {
   state.stepIndex = indexOfPhase(steps, nextPhase);
 
   const step = findStepByPhase(steps, nextPhase);
-  if (!step) return advanceToNextPhase(state, steps);
+  if (!step) return advanceToNextPhase(state, steps, depth + 1);
 
   let response = '';
   if (PHASE_LABELS[nextPhase]) {
@@ -381,66 +404,104 @@ function advanceToNextPhase(state: DialogState, steps: TeachingStep[]): string {
 export async function sendTeachingMessage(
   message: string,
   knowledgePointId: string,
-  history: TeachingMessage[]
+  _history: TeachingMessage[]
 ): Promise<TeachingMessage> {
   updateAgentState('tutor', 'running');
 
   await new Promise(r => setTimeout(r, 800));
 
-  const intent = detectIntent(message);
+  const trimmedMessage = message.trim();
+  if (trimmedMessage.length > 2000) {
+    updateAgentState('tutor', 'completed');
+    return {
+      id: `msg_${Date.now()}`,
+      role: 'tutor',
+      content: '消息过长，请缩短后重试（最多2000字符）。',
+      timestamp: Date.now(),
+      type: 'text',
+    };
+  }
+
+  const intent = detectIntent(trimmedMessage);
+
+  if (trimmedMessage.toLowerCase() === '重新开始' || trimmedMessage.toLowerCase() === 'restart' || trimmedMessage.toLowerCase() === 'reset') {
+    const key = `local_user:${knowledgePointId}`;
+    dialogStates.delete(key);
+    cleanupDialogStates();
+  }
+
   const state = getDialogState('local_user', knowledgePointId);
   const steps = TEACHING_CONTENT[knowledgePointId] || getDefaultSteps();
-  state.history.push(message);
+  state.history.push(trimmedMessage);
+  if (state.history.length > MAX_HISTORY_SIZE) {
+    state.history = state.history.slice(-MAX_HISTORY_SIZE);
+  }
 
   let response: string;
 
-  switch (intent) {
-    case 'confused':
-      response = handleConfused(state, steps);
-      break;
-    case 'want_definition': {
-      const defStep = findStepByPhase(steps, 'definition');
-      if (defStep) {
-        state.currentPhase = 'definition';
-        state.stepIndex = indexOfPhase(steps, 'definition');
-        response = `好的，这里是正式定义：\n\n${defStep.content}\n\n🤔 ${defStep.socraticProbe || ''}`;
-      } else {
-        response = advanceToNextPhase(state, steps);
-      }
-      break;
+  if (trimmedMessage.toLowerCase() === '重新开始' || trimmedMessage.toLowerCase() === 'restart' || trimmedMessage.toLowerCase() === 'reset') {
+    const firstStep = steps[0];
+    response = `好的，让我们重新开始学习「${KNOWLEDGE_NAMES[knowledgePointId] || knowledgePointId}」！\n\n${firstStep?.content || ''}`;
+    if (firstStep?.socraticProbe) {
+      response += `\n\n🤔 ${firstStep.socraticProbe}`;
     }
-    case 'want_example': {
-      const exStep = findStepByPhase(steps, 'example');
-      if (exStep) {
-        state.currentPhase = 'example';
-        state.stepIndex = indexOfPhase(steps, 'example');
-        response = `来看一个具体的例子：\n\n${exStep.content}\n\n💡 ${exStep.socraticProbe || ''}`;
-      } else {
+  } else {
+    switch (intent) {
+      case 'confused':
+        response = handleConfused(state, steps);
+        break;
+      case 'want_definition': {
+        const defStep = findStepByPhase(steps, 'definition');
+        if (defStep) {
+          state.currentPhase = 'definition';
+          state.stepIndex = indexOfPhase(steps, 'definition');
+          response = `好的，这里是正式定义：\n\n${defStep.content}\n\n🤔 ${defStep.socraticProbe || ''}`;
+        } else {
+          response = advanceToNextPhase(state, steps);
+        }
+        break;
+      }
+      case 'want_example': {
+        const exStep = findStepByPhase(steps, 'example');
+        if (exStep) {
+          state.currentPhase = 'example';
+          state.stepIndex = indexOfPhase(steps, 'example');
+          response = `来看一个具体的例子：\n\n${exStep.content}\n\n💡 ${exStep.socraticProbe || ''}`;
+        } else {
+          response = advanceToNextPhase(state, steps);
+        }
+        break;
+      }
+      case 'continue':
         response = advanceToNextPhase(state, steps);
-      }
-      break;
+        break;
+      case 'student_answer':
+        if (state.currentPhase === 'practice') {
+          const currentStep = steps[state.stepIndex];
+          if (!currentStep) {
+            response = advanceToNextPhase(state, steps);
+          } else {
+            const isPositive = /对|正确|是|yes|=|答案/.test(message.toLowerCase());
+            response = isPositive
+              ? `✅ 很好！看来你已经掌握了这个要点。\n\n${currentStep?.socraticProbe || ''}\n\n输入「继续」进入下一个教学环节`
+              : `🤔 思路方向值得肯定，但可能还需要调整。\n\n让我给你一些引导：${currentStep?.socraticProbe || ''}`;
+          }
+        } else {
+          const currentStep = steps[state.stepIndex];
+          response = currentStep
+            ? `收到你的想法！${currentStep.socraticProbe || ''}\n\n输入「继续」进入下一环节，或输入「例子」看更多例题`
+            : advanceToNextPhase(state, steps);
+        }
+        break;
+      case 'greeting':
+        response = `你好！我是你的AI数学导师 🎓 今天我们一起来学习「${KNOWLEDGE_NAMES[knowledgePointId] || knowledgePointId}」。准备好了吗？输入「开始」或「继续」即可！`;
+        break;
+      default:
+        response = advanceToNextPhase(state, steps);
     }
-    case 'continue':
-      response = advanceToNextPhase(state, steps);
-      break;
-    case 'student_answer':
-      if (state.currentPhase === 'practice') {
-        const currentStep = steps[state.stepIndex];
-        const isPositive = /对|正确|是|yes|=|答案/.test(message.toLowerCase());
-        response = isPositive
-          ? `✅ 很好！看来你已经掌握了这个要点。\n\n${currentStep?.socraticProbe || ''}\n\n输入「继续」进入下一个教学环节`
-          : `🤔 思路方向值得肯定，但可能还需要调整。\n\n让我给你一些引导：${currentStep?.socraticProbe || ''}`;
-      } else {
-        const currentStep = steps[state.stepIndex];
-        response = `收到你的想法！${currentStep?.socraticProbe || ''}\n\n输入「继续」进入下一环节，或输入「例子」看更多例题`;
-      }
-      break;
-    case 'greeting':
-      response = `你好！我是你的AI数学导师 🎓 今天我们一起来学习「${KNOWLEDGE_NAMES[knowledgePointId] || knowledgePointId}」。准备好了吗？输入「开始」或「继续」即可！`;
-      break;
-    default:
-      response = advanceToNextPhase(state, steps);
   }
+
+  cleanupDialogStates();
 
   const tutorMessage: TeachingMessage = {
     id: `msg_${Date.now()}`,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -13,7 +13,7 @@ interface DiagnosisPageProps {
   onNavigate: (page: 'landing' | 'diagnosis' | 'teaching' | 'path' | 'report' | 'admin') => void;
 }
 
-export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: DiagnosisPageProps) {
+export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, { questionId: string; knowledgePointId: string; correct: boolean }>>({});
@@ -21,6 +21,7 @@ export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: Diagnosis
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<DiagnosisResult | null>(null);
   const [agents, setAgents] = useState<AgentState[]>(getAgentStates());
+  const fillInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const allQuestions = getQuestions();
@@ -74,6 +75,7 @@ export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: Diagnosis
     const diagnosis = await runDiagnosis(answerList);
     setResult(diagnosis);
     setIsSubmitting(false);
+    onComplete(diagnosis);
   };
 
   // 结果展示
@@ -244,7 +246,7 @@ export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: Diagnosis
             __html: renderLatex(currentQuestion.content)
           }} />
           <span className="text-xs text-muted-foreground">
-            难度：{'★'.repeat(currentQuestion.difficulty)}{'☆'.repeat(5 - currentQuestion.difficulty)}
+            难度：{'★'.repeat(Math.max(0, Math.min(5, currentQuestion.difficulty)))}{'☆'.repeat(Math.max(0, 5 - Math.max(0, Math.min(5, currentQuestion.difficulty))))}
           </span>
         </div>
 
@@ -285,12 +287,12 @@ export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: Diagnosis
                   handleAnswer((e.target as HTMLInputElement).value);
                 }
               }}
+              ref={fillInputRef}
               className="w-full p-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-muted-foreground focus:outline-none focus:border-indigo-500/50"
             />
             <Button
               onClick={() => {
-                const input = document.querySelector('input') as HTMLInputElement;
-                if (input) handleAnswer(input.value);
+                if (fillInputRef.current) handleAnswer(fillInputRef.current.value);
               }}
               className="bg-indigo-500 hover:bg-indigo-600 text-white"
             >
@@ -358,9 +360,18 @@ export function DiagnosisPage({ onComplete: _onComplete, onNavigate }: Diagnosis
   );
 }
 
-// 简单的LaTeX渲染（实际项目中应使用 KaTeX）
-function renderLatex(text: string): string {
+function sanitizeHtml(text: string): string {
   return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+function renderLatex(text: string): string {
+  const sanitized = sanitizeHtml(text);
+  return sanitized
     .replace(/\\lim_{(.*?)}/g, 'lim<sub>$1</sub>')
     .replace(/\\to/g, '→')
     .replace(/\\frac{(.*?)}{(.*?)}/g, '($1)/($2)')

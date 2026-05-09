@@ -32,6 +32,7 @@ export interface AgentMessage {
     difficulty?: 'easy' | 'medium' | 'hard';
     formula?: string;
     action?: 'diagnose' | 'teach' | 'plan' | 'evaluate' | 'hint' | 'praise';
+    phase?: string;
   };
 }
 
@@ -119,6 +120,8 @@ export interface TeachingMessage {
     knowledgePoint?: string;
     isSocratic?: boolean;
     hintLevel?: number;
+    phase?: string;
+    intent?: string;
   };
 }
 

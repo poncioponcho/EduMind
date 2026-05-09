@@ -41,14 +41,23 @@ export function createUser(username: string, learningStyle: User['learningStyle'
   return user;
 }
 
+function safeJsonParse<T>(data: string | null, fallback: T): T {
+  if (!data) return fallback;
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export function getUsers(): User[] {
   const data = localStorage.getItem(DB_KEYS.users);
-  return data ? JSON.parse(data) : [];
+  return safeJsonParse<User[]>(data, []);
 }
 
 export function getCurrentUser(): User | null {
   const data = localStorage.getItem(DB_KEYS.currentUser);
-  return data ? JSON.parse(data) : null;
+  return safeJsonParse<User | null>(data, null);
 }
 
 // ===== 题库管理 =====
@@ -214,7 +223,7 @@ export function initQuestions(): void {
 export function getQuestions(): Question[] {
   initQuestions();
   const data = localStorage.getItem(DB_KEYS.questions);
-  return data ? JSON.parse(data) : [];
+  return safeJsonParse<Question[]>(data, []);
 }
 
 export function getQuestionsByKnowledgePoint(kpId: string): Question[] {
@@ -393,7 +402,7 @@ export function initKnowledgeGraph(): void {
 export function getKnowledgePoints(): KnowledgePoint[] {
   initKnowledgeGraph();
   const data = localStorage.getItem(DB_KEYS.knowledgePoints);
-  return data ? JSON.parse(data) : [];
+  return safeJsonParse<KnowledgePoint[]>(data, []);
 }
 
 export function getKnowledgePointById(id: string): KnowledgePoint | undefined {
@@ -404,13 +413,13 @@ export function getKnowledgePointById(id: string): KnowledgePoint | undefined {
 
 export function getLearningRecords(userId: string): LearningRecord[] {
   const data = localStorage.getItem(DB_KEYS.learningRecords);
-  const records: LearningRecord[] = data ? JSON.parse(data) : [];
+  const records = safeJsonParse<LearningRecord[]>(data, []);
   return records.filter(r => r.userId === userId);
 }
 
 export function updateLearningRecord(record: LearningRecord): void {
   const data = localStorage.getItem(DB_KEYS.learningRecords);
-  const records: LearningRecord[] = data ? JSON.parse(data) : [];
+  const records = safeJsonParse<LearningRecord[]>(data, []);
   const idx = records.findIndex(r => r.id === record.id);
   if (idx >= 0) {
     records[idx] = record;
@@ -450,7 +459,7 @@ export function initLearningRecords(userId: string): void {
 
 export function saveLearningPath(path: LearningPath): void {
   const data = localStorage.getItem(DB_KEYS.learningPaths);
-  const paths: LearningPath[] = data ? JSON.parse(data) : [];
+  const paths = safeJsonParse<LearningPath[]>(data, []);
   const idx = paths.findIndex(p => p.id === path.id);
   if (idx >= 0) {
     paths[idx] = path;
@@ -462,7 +471,7 @@ export function saveLearningPath(path: LearningPath): void {
 
 export function getLearningPaths(userId: string): LearningPath[] {
   const data = localStorage.getItem(DB_KEYS.learningPaths);
-  const paths: LearningPath[] = data ? JSON.parse(data) : [];
+  const paths = safeJsonParse<LearningPath[]>(data, []);
   return paths.filter(p => p.userId === userId);
 }
 
@@ -470,14 +479,14 @@ export function getLearningPaths(userId: string): LearningPath[] {
 
 export function saveEvaluationReport(report: EvaluationReport): void {
   const data = localStorage.getItem(DB_KEYS.evaluationReports);
-  const reports: EvaluationReport[] = data ? JSON.parse(data) : [];
+  const reports = safeJsonParse<EvaluationReport[]>(data, []);
   reports.push(report);
   localStorage.setItem(DB_KEYS.evaluationReports, JSON.stringify(reports));
 }
 
 export function getEvaluationReports(userId: string): EvaluationReport[] {
   const data = localStorage.getItem(DB_KEYS.evaluationReports);
-  const reports: EvaluationReport[] = data ? JSON.parse(data) : [];
+  const reports = safeJsonParse<EvaluationReport[]>(data, []);
   return reports.filter(r => r.userId === userId);
 }
 
@@ -494,7 +503,7 @@ export function createTeachingSession(userId: string, knowledgePointId: string):
     status: 'active',
   };
   const data = localStorage.getItem(DB_KEYS.teachingSessions);
-  const sessions: TeachingSession[] = data ? JSON.parse(data) : [];
+  const sessions = safeJsonParse<TeachingSession[]>(data, []);
   sessions.push(session);
   localStorage.setItem(DB_KEYS.teachingSessions, JSON.stringify(sessions));
   return session;
@@ -502,13 +511,13 @@ export function createTeachingSession(userId: string, knowledgePointId: string):
 
 export function getTeachingSession(sessionId: string): TeachingSession | undefined {
   const data = localStorage.getItem(DB_KEYS.teachingSessions);
-  const sessions: TeachingSession[] = data ? JSON.parse(data) : [];
+  const sessions = safeJsonParse<TeachingSession[]>(data, []);
   return sessions.find(s => s.id === sessionId);
 }
 
 export function addTeachingMessage(sessionId: string, message: TeachingSession['messages'][0]): void {
   const data = localStorage.getItem(DB_KEYS.teachingSessions);
-  const sessions: TeachingSession[] = data ? JSON.parse(data) : [];
+  const sessions = safeJsonParse<TeachingSession[]>(data, []);
   const session = sessions.find(s => s.id === sessionId);
   if (session) {
     session.messages.push(message);
@@ -521,7 +530,7 @@ export function addTeachingMessage(sessionId: string, message: TeachingSession['
 
 export function logAgentMessage(message: AgentMessage): void {
   const data = localStorage.getItem(DB_KEYS.agentLogs);
-  const logs: AgentMessage[] = data ? JSON.parse(data) : [];
+  const logs = safeJsonParse<AgentMessage[]>(data, []);
   logs.push(message);
   // 只保留最近 1000 条
   if (logs.length > 1000) {
@@ -532,7 +541,7 @@ export function logAgentMessage(message: AgentMessage): void {
 
 export function getAgentLogs(agent?: string): AgentMessage[] {
   const data = localStorage.getItem(DB_KEYS.agentLogs);
-  const logs: AgentMessage[] = data ? JSON.parse(data) : [];
+  const logs = safeJsonParse<AgentMessage[]>(data, []);
   return agent ? logs.filter(l => l.agent === agent) : logs;
 }
 
