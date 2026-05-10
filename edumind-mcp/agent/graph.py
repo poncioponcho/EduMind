@@ -82,10 +82,11 @@ async def build_agent():
             mcp_config[name]["url"] = server["url"]
 
     tools = []
+    mcp_client = None
     if mcp_config:
         try:
-            mcp = MultiServerMCPClient(mcp_config)
-            tools = await mcp.get_tools()
+            mcp_client = MultiServerMCPClient(mcp_config)
+            tools = await mcp_client.get_tools()
             logger.info(f"MCP工具加载成功: {len(tools)}个工具")
         except Exception as e:
             logger.error(f"MCP工具加载失败: {e}\n{traceback.format_exc()}")

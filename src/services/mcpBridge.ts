@@ -1,5 +1,23 @@
-const MCP_API_URL = import.meta.env.VITE_MCP_API_URL || 'http://localhost:8000';
-const MCP_WS_URL = import.meta.env.VITE_MCP_WS_URL || 'ws://localhost:8000/ws/events';
+const DEFAULT_MCP_API_URL = 'http://localhost:8000';
+const DEFAULT_MCP_WS_URL = 'ws://localhost:8000/ws/events';
+
+function resolveMCPUrls() {
+  const apiUrl = import.meta.env.VITE_MCP_API_URL || '';
+  const wsUrl = import.meta.env.VITE_MCP_WS_URL || '';
+
+  if (apiUrl && wsUrl) {
+    return { apiUrl, wsUrl };
+  }
+
+  if (apiUrl && !wsUrl) {
+    const wsBase = apiUrl.replace(/^http/, 'ws');
+    return { apiUrl, wsUrl: `${wsBase}/ws/events` };
+  }
+
+  return { apiUrl: DEFAULT_MCP_API_URL, wsUrl: DEFAULT_MCP_WS_URL };
+}
+
+const { apiUrl: MCP_API_URL, wsUrl: MCP_WS_URL } = resolveMCPUrls();
 
 interface ToolCallResult {
   name: string;
@@ -16,7 +34,7 @@ interface TeachResponse {
 }
 
 type ToolCallHandler = (tool: ToolCallResult) => void;
-type StatusHandler = (status: 'connecting' | 'connected' | 'disconnected') => void;
+type StatusHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'unavailable') => void;
 
 const SAFE_PATH_REGEX = /^[a-zA-Z0-9_\-\.]+$/;
 
@@ -26,9 +44,22 @@ class MCPBridge {
   private statusHandlers: StatusHandler[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 10;
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private lastHealthStatus: 'ok' | 'degraded' | 'down' = 'down';
+  private _isLocalMode: boolean;
+
+  constructor() {
+    this._isLocalMode = MCP_API_URL.includes('localhost') || MCP_API_URL.includes('127.0.0.1');
+  }
+
+  get isLocalMode(): boolean {
+    return this._isLocalMode;
+  }
+
+  get mcpApiUrl(): string {
+    return MCP_API_URL;
+  }
 
   onToolCall(handler: ToolCallHandler) {
     this.toolCallHandlers.push(handler);
@@ -101,9 +132,12 @@ class MCPBridge {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.notifyStatus('unavailable');
+      return;
+    }
 
-    const delay = Math.min(5000 * Math.pow(1.5, this.reconnectAttempts), 30000);
+    const delay = Math.min(2000 * Math.pow(1.5, this.reconnectAttempts), 30000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.reconnectAttempts++;
@@ -133,8 +167,20 @@ class MCPBridge {
     }
   }
 
-  private notifyStatus(status: 'connecting' | 'connected' | 'disconnected') {
+  private notifyStatus(status: 'connecting' | 'connected' | 'disconnected' | 'unavailable') {
     this.statusHandlers.forEach(h => h(status));
+  }
+
+  async checkAvailability(): Promise<boolean> {
+    try {
+      const res = await fetch(`${MCP_API_URL}/api/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json();
+      return data.llm_ready === true;
+    } catch {
+      return false;
+    }
   }
 
   async teach(message: string, history?: Array<{role: string; content: string}>): Promise<TeachResponse> {
@@ -208,8 +254,13 @@ class MCPBridge {
           error: 'timeout',
         };
       }
+
+      const hint = this._isLocalMode
+        ? '请确保MCP后端已启动：cd edumind-mcp && source .venv/bin/activate && python api/server.py'
+        : 'MCP服务地址不可达，请检查Vercel环境变量 VITE_MCP_API_URL 是否正确配置';
+
       return {
-        message: '无法连接MCP服务。请确保后端已启动：cd edumind-mcp && python api/server.py',
+        message: `无法连接MCP服务。${hint}`,
         tools_used: [],
         phase: 'error',
         emotion: 'neutral',

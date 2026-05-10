@@ -22,7 +22,7 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
   const [agents, setAgents] = useState<AgentState[]>(getAgentStates());
   const [showHint, setShowHint] = useState(false);
   const [useMCP, setUseMCP] = useState(false);
-  const [mcpStatus, setMcpStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [mcpStatus, setMcpStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'unavailable'>('disconnected');
   const [activeTools, setActiveTools] = useState<ToolCallResult[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
