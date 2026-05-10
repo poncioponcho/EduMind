@@ -1,0 +1,21 @@
+servers:
+  wolfram:
+    command: "python"
+    args: ["mcp_servers/math_server.py"]
+    transport: "stdio"
+    tools: ["calculate", "solve_equation", "plot_function", "derivative_step", "integral_step"]
+  jupyter:
+    command: "python"
+    args: ["mcp_servers/code_server.py"]
+    transport: "stdio"
+    tools: ["execute_python", "run_cell", "install_package"]
+  arxiv:
+    command: "python"
+    args: ["mcp_servers/paper_server.py"]
+    transport: "stdio"
+    tools: ["search_papers", "get_abstract", "get_related"]
+  visualization:
+    command: "python"
+    args: ["mcp_servers/viz_server.py"]
+    transport: "stdio"
+    tools: ["plot_chart", "render_latex", "animate_function"]
