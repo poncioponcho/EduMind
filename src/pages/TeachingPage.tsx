@@ -91,19 +91,33 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
 
     if (useMCP) {
       const result = await mcpBridge.teach(input.trim(), messages.map(m => ({ role: m.role, content: m.content })));
-      const tutorMsg: TeachingMessage = {
-        id: `msg_${Date.now()}`,
-        role: 'tutor',
-        content: result.message,
-        timestamp: Date.now(),
-        type: 'text',
-        metadata: {
-          knowledgePoint: selectedKP.id,
-          isSocratic: result.message.includes('？') || result.message.includes('?'),
-          phase: result.phase,
-        },
-      };
-      setMessages(prev => [...prev, tutorMsg]);
+
+      if (result.error && result.phase === 'error') {
+        const fallbackMsg = await sendTeachingMessage(input.trim(), selectedKP.id, messages);
+        const systemNote: TeachingMessage = {
+          id: `msg_note_${Date.now()}`,
+          role: 'tutor',
+          content: `⚠️ MCP服务暂时不可用（${result.message}），已切换到本地教学模式：`,
+          timestamp: Date.now(),
+          type: 'text',
+          metadata: { knowledgePoint: selectedKP.id, isSocratic: false, phase: 'error' },
+        };
+        setMessages(prev => [...prev, systemNote, fallbackMsg]);
+      } else {
+        const tutorMsg: TeachingMessage = {
+          id: `msg_${Date.now()}`,
+          role: 'tutor',
+          content: result.message,
+          timestamp: Date.now(),
+          type: 'text',
+          metadata: {
+            knowledgePoint: selectedKP.id,
+            isSocratic: result.message.includes('？') || result.message.includes('?'),
+            phase: result.phase,
+          },
+        };
+        setMessages(prev => [...prev, tutorMsg]);
+      }
     } else {
       const tutorMsg = await sendTeachingMessage(input.trim(), selectedKP.id, messages);
       setMessages(prev => [...prev, tutorMsg]);

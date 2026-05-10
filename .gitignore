@@ -27,6 +27,8 @@ dist-ssr
 edumind.bundle
 *.bundle.*
 .env*.local
+.env
+assets/plots/
 
 __pycache__/
 *.pyc
