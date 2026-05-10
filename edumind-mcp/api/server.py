@@ -7,10 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from agent.graph import run_teaching
+
+sys_path = os.path.join(os.path.dirname(__file__), "..")
+if sys_path not in os.sys.path:
+    os.sys.path.insert(0, sys_path)
+
+from agent.llm_provider import get_llm, PROVIDER_INFO
 
 
 class TeachRequest(BaseModel):
@@ -20,24 +22,39 @@ class TeachRequest(BaseModel):
     history: Optional[list] = None
 
 
-class ToolCallEvent(BaseModel):
-    type: str
-    tool_name: str
-    args: dict
-    result: Optional[str] = None
-
-
 active_connections: list[WebSocket] = []
+
+_detected_provider: str | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("EduMind MCP API Server 启动中...")
+    global _detected_provider
+    print("=" * 50)
+    print("EduMind MCP Super Teacher 启动中...")
+    print(f"  支持的LLM提供商: {', '.join(PROVIDER_INFO.keys())}")
+    print("-" * 50)
+
+    try:
+        llm = get_llm()
+        _detected_provider = os.environ.get("LLM_PROVIDER", "auto-detect")
+        provider_key = next(
+            (k for k in ["GOOGLE_API_KEY", "DASHSCOPE_API_KEY", "MOONSHOT_API_KEY", "OPENAI_API_KEY"]
+             if os.environ.get(k)), None
+        )
+        print(f"  ✅ LLM已就绪: {_detected_provider}")
+        if provider_key:
+            key_preview = os.environ[provider_key][:8] + "***"
+            print(f"  🔑 使用Key: {provider_key}={key_preview}")
+    except ValueError as e:
+        _detected_provider = "none"
+        print(f"  ⚠️  {e}")
+
     yield
-    print("EduMind MCP API Server 关闭")
+    print("\nEduMind MCP Server 关闭")
 
 
-app = FastAPI(title="EduMind MCP API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="EduMind MCP API", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,7 +71,17 @@ app.mount("/plots", StaticFiles(directory=plots_dir), name="plots")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "edumind-mcp"}
+    return {
+        "status": "ok",
+        "service": "edumind-mcp",
+        "version": "1.1.0",
+        "llm_provider": _detected_provider or "未配置",
+        "supported_providers": list(PROVIDER_INFO.keys()),
+        "providers_configured": {
+            name: bool(os.environ.get(info["env"]))
+            for name, info in PROVIDER_INFO.items()
+        },
+    }
 
 
 @app.post("/api/teach")
@@ -82,6 +109,8 @@ async def teach(req: TeachRequest):
         return result
     except asyncio.TimeoutError:
         return {"error": "请求超时，请稍后重试", "message": "让我再想想这个问题..."}
+    except ValueError as exc:
+        return {"error": str(exc), "message": "请配置LLM API Key后重试"}
     except Exception as exc:
         return {"error": f"处理错误: {str(exc)}", "message": "抱歉，处理时出了点问题，请重试"}
 
@@ -102,4 +131,5 @@ async def websocket_events(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
+    from agent.graph import run_teaching
     uvicorn.run(app, host="0.0.0.0", port=8000)

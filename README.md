@@ -107,7 +107,8 @@
 |------|------|
 | 前端 | React 19 + TypeScript + Tailwind CSS + shadcn/ui |
 | 网关 | Go 1.21 + Gin + gorilla/websocket |
-| MCP | LangGraph + LangChain MCP Adapters + Gemini 2.0 Flash |
+| MCP | LangGraph + LangChain MCP Adapters + 多LLM提供商 |
+| LLM | Gemini / 通义千问(百炼) / Kimi Code / OpenAI GPT（4选1） |
 | 工具 | SymPy(数学) + Python(代码) + Matplotlib(可视化) + ArXiv(论文) |
 | 并发 | goroutine + channel (替代 C++ pthread) |
 | 数据 | localStorage + JSON知识图谱 |
@@ -118,14 +119,31 @@
 ### 方式一：Docker Compose（推荐）
 
 ```bash
-# 设置 Gemini API Key
-export GOOGLE_API_KEY=your_key_here
+# 设置 LLM API Key（4选1）
+export GOOGLE_API_KEY=xxx          # Google Gemini（免费）
+export DASHSCOPE_API_KEY=xxx       # 阿里云百炼 通义千问（免费）
+export MOONSHOT_API_KEY=xxx        # Kimi Code（免费）
+export OPENAI_API_KEY=xxx          # OpenAI GPT
+
+# 可选：强制指定 LLM 提供商
+export LLM_PROVIDER=qwen          # gemini | qwen | kimi | openai
 
 docker-compose up --build
 # 前端: http://localhost:3000
 # Go后端: http://localhost:8080
 # MCP服务: http://localhost:8000
 ```
+
+### LLM 提供商对比
+
+| 提供商 | 环境变量 | 免费额度 | 获取地址 |
+|--------|---------|---------|---------|
+| **Google Gemini** | `GOOGLE_API_KEY` | ✅ 有 | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **阿里云百炼(通义千问)** | `DASHSCOPE_API_KEY` | ✅ 有 | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) |
+| **Kimi Code** | `MOONSHOT_API_KEY` | ✅ 有 | [platform.moonshot.cn](https://platform.moonshot.cn/console/api-keys) |
+| **OpenAI GPT** | `OPENAI_API_KEY` | ❌ 付费 | [platform.openai.com](https://platform.openai.com/api-keys) |
+
+> 不设置 `LLM_PROVIDER` 时，系统自动检测已配置的 Key 并选择对应提供商。
 
 ### 方式二：本地开发
 
@@ -142,7 +160,10 @@ go run main.go   # http://localhost:8080
 # MCP超级教师（终端3）
 cd edumind-mcp
 pip install -r requirements.txt
-export GOOGLE_API_KEY=your_key_here
+
+# 设置 LLM Key（4选1）
+export DASHSCOPE_API_KEY=your_key_here   # 推荐：阿里云百炼，国内访问快
+
 python api/server.py  # http://localhost:8000
 ```
 

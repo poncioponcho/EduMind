@@ -1,12 +1,11 @@
 import os
 import yaml
-import json
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from agent.state import EduState
+from agent.llm_provider import get_llm
 
 TEACHER_PROMPT = """你是EduMind超级教师，一位精通高等数学的AI导师。你的教学原则：
 
@@ -74,11 +73,10 @@ async def build_agent():
     mcp = MultiServerMCPClient(mcp_config)
     tools = await mcp.get_tools()
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        temperature=0.7,
-        google_api_key=os.environ.get("GOOGLE_API_KEY", ""),
-    ).bind_tools(tools)
+    provider_name = os.environ.get("LLM_PROVIDER", "auto")
+    print(f"[MCP] 初始化LLM提供商: {provider_name}")
+
+    llm = get_llm(provider_name).bind_tools(tools)
 
     async def bound_teacher_node(state: EduState) -> dict:
         last_message = state["messages"][-1].content if state["messages"] else ""
