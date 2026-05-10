@@ -16,6 +16,15 @@ def get_llm(provider: str = None) -> BaseChatModel:
     """
     provider = (provider or os.environ.get("LLM_PROVIDER", "")).lower()
 
+    _debug_env = {k: (v[:8]+"..." if v else "None") for k, v in {
+        "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY"),
+        "DASHSCOPE_API_KEY": os.environ.get("DASHSCOPE_API_KEY"),
+        "MOONSHOT_API_KEY": os.environ.get("MOONSHOT_API_KEY"),
+        "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
+    }.items()}
+    import sys
+    print(f"[LLM-DEBUG] get_llm(provider={provider}) env={_debug_env}", file=sys.stderr)
+
     if provider in ("", "gemini") and os.environ.get("GOOGLE_API_KEY"):
         return _create_gemini()
     if provider in ("", "qwen", "dashscope", "bailian") and os.environ.get("DASHSCOPE_API_KEY"):
@@ -48,7 +57,7 @@ def _create_gemini(tools=None):
 def _create_qwen(tools=None):
     from langchain_openai import ChatOpenAI
     llm = ChatOpenAI(
-        model=os.environ.get("QWEN_MODEL", "qwen-max"),
+        model=os.environ.get("QWEN_MODEL", "qwen-plus"),
         temperature=float(os.environ.get("LLM_TEMPERATURE", "0.7")),
         api_key=os.environ["DASHSCOPE_API_KEY"],
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -59,7 +68,7 @@ def _create_qwen(tools=None):
 def _create_kimi(tools=None):
     from langchain_openai import ChatOpenAI
     llm = ChatOpenAI(
-        model=os.environ.get("KIMI_MODEL", "moonshot-v1-128k"),
+        model=os.environ.get("KIMI_MODEL", "moonshot-v1-auto"),
         temperature=float(os.environ.get("LLM_TEMPERATURE", "0.7")),
         api_key=os.environ["MOONSHOT_API_KEY"],
         base_url="https://api.moonshot.cn/v1",

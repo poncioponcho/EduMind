@@ -24,12 +24,14 @@ class TeachRequest(BaseModel):
 
 active_connections: list[WebSocket] = []
 
+_cached_run_teaching = None
 _detected_provider: str | None = None
+_provider_info: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _detected_provider
+    global _cached_run_teaching, _detected_provider, _provider_info
     print("=" * 50)
     print("EduMind MCP Super Teacher 启动中...")
     print(f"  支持的LLM提供商: {', '.join(PROVIDER_INFO.keys())}")
@@ -46,15 +48,75 @@ async def lifespan(app: FastAPI):
         if provider_key:
             key_preview = os.environ[provider_key][:8] + "***"
             print(f"  🔑 使用Key: {provider_key}={key_preview}")
+
+        from agent.graph import build_agent
+        graph, tools = await build_agent()
+        _cached_run_teaching = await _make_cached_teaching(graph)
+        _provider_info = {
+            "name": PROVIDER_INFO.get(_detected_provider.replace("auto-detect", ""), {}).get("name", _detected_provider),
+            "model": str(getattr(llm, 'model_name', getattr(llm, 'model', 'unknown'))),
+        }
+        print(f"  🧠 ReAct图已构建，{len(tools)}个MCP工具已注册")
+        print(f"  📦 模型: {_provider_info.get('model', 'unknown')}")
     except ValueError as e:
         _detected_provider = "none"
         print(f"  ⚠️  {e}")
+        print(f"  ℹ️  服务将以无LLM模式运行（仅MCP工具可用）")
 
     yield
     print("\nEduMind MCP Server 关闭")
 
 
-app = FastAPI(title="EduMind MCP API", version="1.1.0", lifespan=lifespan)
+async def _make_cached_teaching(graph):
+    from agent.graph import EduState
+    from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+
+    async def cached_run(message: str, history: list = []) -> dict:
+        state = {
+            "messages": [HumanMessage(content=message)],
+            "tools_used": [],
+            "observation": "",
+            "phase": "teaching",
+            "emotion": "neutral",
+        }
+
+        if history:
+            for msg in history[-10:]:
+                if msg.get("role") == "student":
+                    state["messages"].insert(-1, HumanMessage(content=msg["content"]))
+                elif msg.get("role") == "tutor":
+                    state["messages"].insert(-1, AIMessage(content=msg["content"]))
+
+        result = await graph.ainvoke(state)
+
+        tools_used = []
+        for msg in result["messages"]:
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tools_used.append({"name": tc["name"], "args": tc.get("args", {})})
+            if isinstance(msg, ToolMessage):
+                for tu in tools_used:
+                    if not tu.get("result"):
+                        tu["result"] = msg.content[:500]
+                        break
+
+        response_text = ""
+        for msg in reversed(result["messages"]):
+            if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
+                response_text = msg.content
+                break
+
+        return {
+            "message": response_text or "让我想想这个问题...",
+            "tools_used": tools_used,
+            "phase": result.get("phase", "teaching"),
+            "emotion": result.get("emotion", "neutral"),
+        }
+
+    return cached_run
+
+
+app = FastAPI(title="EduMind MCP API", version="1.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,8 +136,10 @@ async def health():
     return {
         "status": "ok",
         "service": "edumind-mcp",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "llm_provider": _detected_provider or "未配置",
+        "llm_model": _provider_info.get("model", "N/A") if _provider_info else "N/A",
+        "llm_ready": _cached_run_teaching is not None,
         "supported_providers": list(PROVIDER_INFO.keys()),
         "providers_configured": {
             name: bool(os.environ.get(info["env"]))
@@ -89,10 +153,13 @@ async def teach(req: TeachRequest):
     if len(req.message) > 2000:
         return {"error": "消息过长（最多2000字符）"}
 
+    if _cached_run_teaching is None:
+        return {"error": "LLM未初始化，请检查API Key配置", "message": "请配置LLM API Key后重启服务"}
+
     try:
         result = await asyncio.wait_for(
-            run_teaching(req.message, req.history),
-            timeout=30.0,
+            _cached_run_teaching(req.message, req.history),
+            timeout=45.0,
         )
 
         for ws in active_connections:
@@ -102,6 +169,7 @@ async def teach(req: TeachRequest):
                     "user_id": req.user_id,
                     "tools_used": result.get("tools_used", []),
                     "phase": result.get("phase"),
+                    "llm_provider": _detected_provider,
                 })
             except Exception:
                 pass
@@ -131,5 +199,4 @@ async def websocket_events(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    from agent.graph import run_teaching
     uvicorn.run(app, host="0.0.0.0", port=8000)

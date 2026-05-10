@@ -73,7 +73,7 @@ async def build_agent():
     mcp = MultiServerMCPClient(mcp_config)
     tools = await mcp.get_tools()
 
-    provider_name = os.environ.get("LLM_PROVIDER", "auto")
+    provider_name = os.environ.get("LLM_PROVIDER", "") or ""
     print(f"[MCP] 初始化LLM提供商: {provider_name}")
 
     llm = get_llm(provider_name).bind_tools(tools)
