@@ -1,9 +1,8 @@
-from typing import TypedDict, Annotated, Literal
-from langchain_core.messages import add_messages
+from typing import TypedDict, Literal
 
 
 class EduState(TypedDict):
-    messages: Annotated[list, add_messages]
+    messages: list
     tools_used: list
     observation: str
     phase: str

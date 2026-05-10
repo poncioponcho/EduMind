@@ -27,3 +27,7 @@ dist-ssr
 edumind.bundle
 *.bundle.*
 .env*.local
+
+__pycache__/
+*.pyc
+.venv/

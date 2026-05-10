@@ -6,7 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.state import EduState
+from agent.state import EduState
 
 TEACHER_PROMPT = """你是EduMind超级教师，一位精通高等数学的AI导师。你的教学原则：
 
@@ -58,42 +58,6 @@ def _detect_phase(message: str, history: list) -> str:
     return "teaching"
 
 
-async def teacher_node(state: EduState, config: dict) -> dict:
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        temperature=0.7,
-        google_api_key=os.environ.get("GOOGLE_API_KEY", ""),
-    )
-
-    last_message = state["messages"][-1].content if state["messages"] else ""
-    phase = _detect_phase(last_message, state["messages"])
-    emotion = _detect_emotion(last_message)
-
-    prompt = TEACHER_PROMPT.format(phase=phase, emotion=emotion)
-
-    msgs = [SystemMessage(content=prompt)]
-
-    if state.get("tools_used"):
-        tool_summary = "\n".join(
-            f"- {t['name']}: {t.get('result', '')[:200]}" for t in state["tools_used"]
-        )
-        msgs.append(AIMessage(content=f"[工具调用结果]\n{tool_summary}"))
-
-    msgs.extend(state["messages"])
-
-    tools = config.get("configurable", {}).get("tools", [])
-    if tools:
-        llm = llm.bind_tools(tools)
-
-    response = await llm.ainvoke(msgs)
-
-    return {
-        "messages": [response],
-        "phase": phase,
-        "emotion": emotion,
-    }
-
-
 async def build_agent():
     registry = _load_registry()
 
@@ -110,9 +74,40 @@ async def build_agent():
     mcp = MultiServerMCPClient(mcp_config)
     tools = await mcp.get_tools()
 
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash",
+        temperature=0.7,
+        google_api_key=os.environ.get("GOOGLE_API_KEY", ""),
+    ).bind_tools(tools)
+
+    async def bound_teacher_node(state: EduState) -> dict:
+        last_message = state["messages"][-1].content if state["messages"] else ""
+        phase = _detect_phase(last_message, state["messages"])
+        emotion = _detect_emotion(last_message)
+
+        prompt = TEACHER_PROMPT.format(phase=phase, emotion=emotion)
+
+        msgs = [SystemMessage(content=prompt)]
+
+        if state.get("tools_used"):
+            tool_summary = "\n".join(
+                f"- {t['name']}: {t.get('result', '')[:200]}" for t in state["tools_used"]
+            )
+            msgs.append(AIMessage(content=f"[工具调用结果]\n{tool_summary}"))
+
+        msgs.extend(state["messages"])
+
+        response = await llm.ainvoke(msgs)
+
+        return {
+            "messages": [response],
+            "phase": phase,
+            "emotion": emotion,
+        }
+
     g = StateGraph(EduState)
 
-    g.add_node("teacher", teacher_node)
+    g.add_node("teacher", bound_teacher_node)
     g.add_node("tools", ToolNode(tools))
 
     g.add_conditional_edges("teacher", tools_condition, {"tools": "tools", END: END})
@@ -124,7 +119,7 @@ async def build_agent():
     return graph, tools
 
 
-async def run_teaching(message: str, history: list = None) -> dict:
+async def run_teaching(message: str, history: list = []) -> dict:
     graph, tools = await build_agent()
 
     state = {
@@ -142,10 +137,7 @@ async def run_teaching(message: str, history: list = None) -> dict:
             elif msg.get("role") == "tutor":
                 state["messages"].insert(-1, AIMessage(content=msg["content"]))
 
-    result = await graph.ainvoke(
-        state,
-        config={"configurable": {"tools": tools}},
-    )
+    result = await graph.ainvoke(state)
 
     tools_used = []
     for msg in result["messages"]:
@@ -160,7 +152,7 @@ async def run_teaching(message: str, history: list = None) -> dict:
 
     response_text = ""
     for msg in reversed(result["messages"]):
-        if isinstance(msg, AIMessage) and msg.content and not hasattr(msg, "tool_calls"):
+        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
             response_text = msg.content
             break
 
