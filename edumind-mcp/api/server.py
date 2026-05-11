@@ -197,14 +197,27 @@ async def _make_cached_teaching(graph):
     return cached_run
 
 
+def _get_allowed_origins() -> list[str]:
+    env_origins = os.environ.get("ALLOWED_ORIGINS", "")
+    if env_origins:
+        return [o.strip() for o in env_origins.split(",") if o.strip()]
+    return [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:3003",
+        "http://localhost:5173",
+        "http://localhost:80",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
+
+
 app = FastAPI(title="EduMind MCP API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get(
-        "ALLOWED_ORIGINS",
-        "http://localhost:3000,http://localhost:5173,http://localhost:80"
-    ).split(","),
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
