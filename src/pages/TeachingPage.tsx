@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
+import { MathContent } from '@/components/MathContent';
+import { CognitivePanel } from '@/components/CognitivePanel';
 import { sendTeachingMessage, getAgentStates, subscribeToAgentStates, getAgentColor, getAgentName } from '@/services/agentService';
 import { mcpBridge } from '@/services/mcpBridge';
 import { getKnowledgePoints, getQuestionsByKnowledgePoint } from '@/services/database';
@@ -261,6 +263,13 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
         </Card>
       )}
 
+      {/* 认知诊断面板 */}
+      {selectedKP && (
+        <div className="mb-4">
+          <CognitivePanel studentId="local_user" topic={selectedKP.name} />
+        </div>
+      )}
+
       {/* 对话区 */}
       <div className="flex-1 flex gap-4 min-h-0">
         {/* 消息列表 */}
@@ -287,13 +296,15 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
                     </div>
                   )}
                   <div
-                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                       msg.role === 'student'
                         ? 'bg-indigo-500 text-white rounded-tr-sm'
                         : 'bg-white/5 text-white/90 border border-white/10 rounded-tl-sm'
                     }`}
                   >
-                    {msg.content}
+                    {msg.role === 'student' ? msg.content : (
+                      <MathContent content={msg.content} />
+                    )}
                   </div>
                   <span className="text-[10px] text-muted-foreground mt-1 block">
                     {new Date(msg.timestamp).toLocaleTimeString()}

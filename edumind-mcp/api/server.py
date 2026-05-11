@@ -42,6 +42,11 @@ class TeachRequest(BaseModel):
     history: Optional[list] = None
 
 
+class EquivalenceRequest(BaseModel):
+    expression1: str
+    expression2: str
+
+
 active_connections: list[WebSocket] = []
 _connections_lock = asyncio.Lock()
 
@@ -245,6 +250,112 @@ async def health():
         },
         "active_ws_connections": len(active_connections),
     }
+
+
+@app.post("/api/math/equivalence")
+async def math_equivalence(req: EquivalenceRequest):
+    if not req.expression1.strip() or not req.expression2.strip():
+        return {"equivalent": False, "method": "exact", "error": "表达式不能为空"}
+
+    try:
+        import sympy as sp
+        import re
+
+        def extract_math(text):
+            text = re.sub(r'^答案是[:：]\s*', '', text.strip(), flags=re.IGNORECASE)
+            text = re.sub(r'^解[:：]\s*', '', text, flags=re.IGNORECASE)
+            text = re.sub(r'^答[:：]\s*', '', text, flags=re.IGNORECASE)
+            if '=' in text and not text.startswith('='):
+                parts = text.split('=', 1)
+                right = parts[1].strip()
+                if right:
+                    text = right
+            return text.strip()
+
+        def normalize(expr_str):
+            s = expr_str.strip()
+            s = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', s)
+            s = s.replace('\\left(', '(').replace('\\right)', ')')
+            s = s.replace('\\left[', '[').replace('\\right]', ']')
+            s = re.sub(r'\\([a-zA-Z]+)', r'\1', s)
+            s = s.replace('^', '**')
+            s = s.replace('×', '*').replace('÷', '/')
+            s = s.replace('π', 'pi').replace('∞', 'oo')
+            s = re.sub(r'\bdx\b', '', s)
+            s = re.sub(r'\bdy\b', '', s)
+            s = re.sub(r'\bdt\b', '', s)
+            s = re.sub(r'\{([^}]*)\}', r'(\1)', s)
+            s = s.replace('$', '').replace(' ', '')
+            return s
+
+        e1 = extract_math(req.expression1)
+        e2 = extract_math(req.expression2)
+
+        if e1.lower().replace(' ', '') == e2.lower().replace(' ', ''):
+            return {"equivalent": True, "method": "exact"}
+
+        n1 = normalize(e1)
+        n2 = normalize(e2)
+
+        safe_locals = {
+            "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
+            "exp": sp.exp, "log": sp.log, "sqrt": sp.sqrt,
+            "pi": sp.pi, "E": sp.E, "oo": sp.oo,
+            "Integral": sp.Integral, "Abs": sp.Abs,
+        }
+
+        s1 = sp.sympify(n1, locals=safe_locals)
+        s2 = sp.sympify(n2, locals=safe_locals)
+
+        diff = sp.simplify(s1 - s2)
+
+        if diff == 0 or diff is sp.S.Zero:
+            return {
+                "equivalent": True,
+                "method": "symbolic",
+                "normalized_expr1": str(s1),
+                "normalized_expr2": str(s2),
+            }
+
+        free_syms = diff.free_symbols
+        if free_syms:
+            test_points = [0.1, 0.5, 1.0, 2.0, 3.14, -0.5, -1.0]
+            all_match = True
+            for pt in test_points:
+                subs = {sym: pt for sym in free_syms}
+                try:
+                    val = float(diff.subs(subs))
+                    if abs(val) > 1e-6:
+                        all_match = False
+                        break
+                except (TypeError, ValueError, ZeroDivisionError):
+                    all_match = False
+                    break
+
+            if all_match:
+                return {
+                    "equivalent": True,
+                    "method": "numeric",
+                    "normalized_expr1": str(s1),
+                    "normalized_expr2": str(s2),
+                }
+
+        suggestion = None
+        if 'C' in e2 or 'c' in e2.lower():
+            if 'C' not in e1 and 'c' not in e1.lower():
+                suggestion = "你的答案可能缺少积分常数 C"
+
+        return {
+            "equivalent": False,
+            "method": "symbolic+numeric",
+            "normalized_expr1": str(s1),
+            "normalized_expr2": str(s2),
+            "suggestion": suggestion,
+        }
+    except sp.SympifyError:
+        return {"equivalent": False, "method": "parse_error", "error": "无法解析为数学表达式"}
+    except Exception as exc:
+        return {"equivalent": False, "method": "error", "error": str(type(exc).__name__)}
 
 
 @app.post("/api/teach")

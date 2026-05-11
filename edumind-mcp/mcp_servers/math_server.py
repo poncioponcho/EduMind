@@ -261,5 +261,107 @@ def plot_function(function: str, x_range: str = "-5,5") -> str:
         return f"绘图错误: {type(exc).__name__}"
 
 
+def _extract_math(text: str) -> str:
+    text = re.sub(r'^答案是[:：]\s*', '', text.strip(), flags=re.IGNORECASE)
+    text = re.sub(r'^解[:：]\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^答[:：]\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^answer[:：]\s*', '', text, flags=re.IGNORECASE)
+    if '=' in text and not text.startswith('='):
+        parts = text.split('=', 1)
+        right = parts[1].strip()
+        if right and not any(kw in right.lower() for kw in ['define', 'let', '设', '令']):
+            text = right
+    return text.strip()
+
+
+def _normalize_to_sympy(expr_str: str) -> str:
+    s = expr_str.strip()
+    s = s.replace('\\frac{', '((')
+    s = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', s)
+    s = s.replace('\\left(', '(')
+    s = s.replace('\\right)', ')')
+    s = s.replace('\\left[', '[')
+    s = s.replace('\\right]', ']')
+    s = s.replace('\\left\\{', '{')
+    s = s.replace('\\right\\}', '}')
+    s = re.sub(r'\\([a-zA-Z]+)', r'\1', s)
+    s = s.replace('^', '**')
+    s = s.replace('×', '*')
+    s = s.replace('÷', '/')
+    s = s.replace('π', 'pi')
+    s = s.replace('∞', 'oo')
+    s = s.replace('∫', 'Integral')
+    s = s.replace('→', '->')
+    s = s.replace('·', '*')
+    s = s.replace('±', '+-')
+    s = s.replace('dx', '')
+    s = s.replace('dy', '')
+    s = s.replace('dt', '')
+    s = re.sub(r'\bdx\b', '', s)
+    s = re.sub(r'\bdy\b', '', s)
+    s = re.sub(r'\bdt\b', '', s)
+    s = re.sub(r'\{([^}]*)\}', r'(\1)', s)
+    s = s.replace('$', '')
+    s = s.replace(' ', '')
+    return s
+
+
+NUMERIC_TEST_POINTS = [0.1, 0.5, 1.0, 2.0, 3.14, -0.5, -1.0]
+NUMERIC_TOLERANCE = 1e-6
+
+
+@mcp.tool()
+def check_equivalence(expression1: str, expression2: str) -> str:
+    """判断两个数学表达式是否语义等价。支持LaTeX、Python和混合格式。
+    例: check_equivalence("x^2dx=1/3*x^{3}+C", "x^3/3 + C")  → equivalent: true
+        check_equivalence("x^2 + 1", "x^2 + 2")              → equivalent: false
+    """
+    e1 = _extract_math(expression1)
+    e2 = _extract_math(expression2)
+
+    if e1.lower().replace(' ', '') == e2.lower().replace(' ', ''):
+        return f"等价: true\n方法: 精确匹配\n表达式1: {e1}\n表达式2: {e2}"
+
+    n1 = _normalize_to_sympy(e1)
+    n2 = _normalize_to_sympy(e2)
+
+    try:
+        s1 = sympy.sympify(n1, locals=SAFE_LOCALS)
+        s2 = sympy.sympify(n2, locals=SAFE_LOCALS)
+
+        diff = sympy.simplify(s1 - s2)
+
+        if diff == 0 or diff is sympy.S.Zero:
+            return f"等价: true\n方法: 符号化简 (simplify(expr1 - expr2) = 0)\n表达式1: {e1}\n表达式2: {e2}\n标准化1: {s1}\n标准化2: {s2}"
+
+        free_syms = diff.free_symbols
+        if free_syms:
+            all_match = True
+            for pt_val in NUMERIC_TEST_POINTS:
+                substitutions = {sym: pt_val for sym in free_syms}
+                try:
+                    val = float(diff.subs(substitutions))
+                    if abs(val) > NUMERIC_TOLERANCE:
+                        all_match = False
+                        break
+                except (TypeError, ValueError, ZeroDivisionError):
+                    all_match = False
+                    break
+
+            if all_match:
+                return f"等价: true\n方法: 数值验证 (7个测试点, 容差1e-6)\n表达式1: {e1}\n表达式2: {e2}\n标准化1: {s1}\n标准化2: {s2}"
+
+        suggestion = None
+        if 'C' in e2 or 'c' in e2.lower():
+            if 'C' not in e1 and 'c' not in e1.lower():
+                suggestion = "提示: 你的答案可能缺少积分常数 C"
+
+        return f"等价: false\n方法: 符号+数值验证\n表达式1: {e1}\n表达式2: {e2}\n标准化1: {s1}\n标准化2: {s2}\n差值: {diff}{'\\n' + suggestion if suggestion else ''}"
+    except sympy.SympifyError as exc:
+        return f"等价: unknown\n方法: 解析失败\n表达式1: {e1}\n表达式2: {e2}\n错误: 无法解析为数学表达式\n建议: 请使用更标准的数学格式"
+    except Exception as exc:
+        return f"等价: unknown\n方法: 验证异常\n表达式1: {e1}\n表达式2: {e2}\n错误: {type(exc).__name__}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

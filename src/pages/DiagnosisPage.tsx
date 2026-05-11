@@ -4,6 +4,8 @@ import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { runDiagnosis, getAgentStates, subscribeToAgentStates, getAgentColor, getAgentName } from '@/services/agentService';
 import { getQuestions, getKnowledgePointById } from '@/services/database';
+import { MathContent, renderMathContent } from '@/components/MathContent';
+import { validateMathAnswer } from '@/services/mathValidator';
 import type { AgentState, DiagnosisResult, Question, User } from '@/types';
 import { CheckCircle2, XCircle, ChevronRight, ChevronLeft, Brain } from 'lucide-react';
 
@@ -38,10 +40,18 @@ export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
   const hasAnswered = currentQuestion ? answers[currentQuestion.id] !== undefined : false;
   const isCorrect = hasAnswered ? answers[currentQuestion.id].correct : false;
 
-  const handleAnswer = (answer: string) => {
+  const handleAnswer = async (answer: string) => {
     if (!currentQuestion || hasAnswered) return;
 
-    const correct = answer === currentQuestion.answer;
+    let correct: boolean;
+
+    if (currentQuestion.type === 'choice') {
+      correct = answer === currentQuestion.answer;
+    } else {
+      const result = await validateMathAnswer(answer, currentQuestion.answer, currentQuestion.type);
+      correct = result.equivalent;
+    }
+
     setAnswers(prev => ({
       ...prev,
       [currentQuestion.id]: {
@@ -242,9 +252,7 @@ export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
 
         {/* 题目内容 */}
         <div className="mb-6">
-          <h3 className="text-lg md:text-xl text-white leading-relaxed mb-2" dangerouslySetInnerHTML={{
-            __html: renderLatex(currentQuestion.content)
-          }} />
+          <MathContent content={currentQuestion.content} className="text-lg md:text-xl text-white leading-relaxed mb-2" as="h3" />
           <span className="text-xs text-muted-foreground">
             难度：{'★'.repeat(Math.max(0, Math.min(5, currentQuestion.difficulty)))}{'☆'.repeat(Math.max(0, 5 - Math.max(0, Math.min(5, currentQuestion.difficulty))))}
           </span>
@@ -267,7 +275,7 @@ export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
                 } ${hasAnswered ? 'cursor-default' : 'cursor-pointer'}`}
               >
                 <span className="font-mono text-sm mr-3 text-muted-foreground">{String.fromCharCode(65 + i)}.</span>
-                <span dangerouslySetInnerHTML={{ __html: renderLatex(option) }} />
+                <span dangerouslySetInnerHTML={{ __html: renderMathContent(option) }} />
                 {hasAnswered && option === currentQuestion.answer && (
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 inline ml-2" />
                 )}
@@ -316,9 +324,7 @@ export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
                 {isCorrect ? '回答正确' : '回答错误'}
               </span>
             </div>
-            <p className="text-sm text-muted-foreground leading-relaxed" dangerouslySetInnerHTML={{
-              __html: renderLatex(currentQuestion.explanation)
-            }} />
+            <MathContent content={currentQuestion.explanation} className="text-sm text-muted-foreground leading-relaxed" />
           </div>
         )}
       </Card>
@@ -358,34 +364,4 @@ export function DiagnosisPage({ onComplete, onNavigate }: DiagnosisPageProps) {
       )}
     </div>
   );
-}
-
-function sanitizeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-}
-
-function renderLatex(text: string): string {
-  const sanitized = sanitizeHtml(text);
-  return sanitized
-    .replace(/\\lim_{(.*?)}/g, 'lim<sub>$1</sub>')
-    .replace(/\\to/g, '→')
-    .replace(/\\frac{(.*?)}{(.*?)}/g, '($1)/($2)')
-    .replace(/\\int_{(.*?)}{(.*?)}/g, '∫<sub>$1</sub><sup>$2</sup>')
-    .replace(/\\int/g, '∫')
-    .replace(/\\sin/g, 'sin')
-    .replace(/\\cos/g, 'cos')
-    .replace(/\\ln/g, 'ln')
-    .replace(/\\pi/g, 'π')
-    .replace(/\\cdot/g, '·')
-    .replace(/\\infty/g, '∞')
-    .replace(/\\sum_{(.*?)}/g, '∑<sub>$1</sub>')
-    .replace(/\\left\(/g, '(')
-    .replace(/\\right\)/g, ')')
-    .replace(/\\,/g, ' ')
-    .replace(/\\/g, '');
 }

@@ -43,3 +43,43 @@
     @apply bg-background text-foreground;
   }
 }
+
+.math-content .katex-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}
+
+.math-content .katex-inline {
+  display: inline;
+}
+
+.math-content .katex-error {
+  color: #f87171;
+  font-style: italic;
+}
+
+.math-content .katex-error-block {
+  color: #f87171;
+  font-style: italic;
+  display: block;
+  padding: 0.5rem;
+}
+
+.math-content .inline-code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.875em;
+}
+
+.math-content p {
+  margin: 0.5rem 0;
+}
+
+.math-content strong {
+  font-weight: 600;
+  color: #a5b4fc;
+}
