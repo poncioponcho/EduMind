@@ -111,7 +111,15 @@ async def build_agent():
         last_message = ""
         if state["messages"]:
             last_msg = state["messages"][-1]
-            last_message = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
+            raw_content = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
+            if isinstance(raw_content, list):
+                parts = []
+                for part in raw_content:
+                    if isinstance(part, dict) and part.get("text"):
+                        parts.append(part["text"])
+                last_message = " ".join(parts)
+            else:
+                last_message = str(raw_content)
 
         phase = _detect_phase(last_message, state["messages"])
         emotion = _detect_emotion(last_message)
