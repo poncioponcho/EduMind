@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { MathContent } from '@/components/MathContent';
 import { CognitivePanel } from '@/components/CognitivePanel';
+import { FunctionPlotViewer, InlinePlotViewer, extractPlotDataFromResponse, isPlotRequest } from '@/services/plotService';
 import { sendTeachingMessage, getAgentStates, subscribeToAgentStates, getAgentColor, getAgentName } from '@/services/agentService';
 import { mcpBridge } from '@/services/mcpBridge';
 import { getKnowledgePoints, getQuestionsByKnowledgePoint } from '@/services/database';
@@ -303,7 +304,24 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
                     }`}
                   >
                     {msg.role === 'student' ? msg.content : (
-                      <MathContent content={msg.content} />
+                      <div className="space-y-3">
+                        <MathContent content={msg.content} />
+                        {/* 检测并显示函数图像 */}
+                        {(() => {
+                          const plotData = extractPlotDataFromResponse(msg.content);
+                          if (plotData) {
+                            return (
+                              <div className="mt-3">
+                                <InlinePlotViewer
+                                  imageUrl={plotData.image_base64 ? `data:image/png;base64,${plotData.image_base64}` : plotData.image_url || ''}
+                                  alt={plotData.metadata?.title || '函数图像'}
+                                />
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                     )}
                   </div>
                   <span className="text-[10px] text-muted-foreground mt-1 block">
@@ -357,17 +375,42 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
                       <div>
                         <span className="text-white font-mono">{tool.name}</span>
                         {tool.result && (
-                          <p className="text-muted-foreground mt-0.5 line-clamp-3">
-                            {tool.result}
-                          </p>
-                        )}
-                        {tool.result && (tool.result.includes('.png') || tool.result.includes('plots/')) && (
-                          <img
-                            src={mcpBridge.getPlotUrl(tool.result.match(/plots\/[^\s]+/)?.[0] || '')}
-                            alt="MCP plot"
-                            className="mt-2 rounded-lg max-w-full border border-white/10"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
+                          <div className="mt-2">
+                            {/* 检测是否为图像数据 */}
+                            {(() => {
+                              const plotData = extractPlotDataFromResponse(tool.result);
+                              if (plotData) {
+                                return (
+                                  <FunctionPlotViewer
+                                    plotData={plotData}
+                                    className="mt-2"
+                                  />
+                                );
+                              }
+                              
+                              // 原有的图像URL检测逻辑
+                              if (tool.result.includes('.png') || tool.result.includes('plots/')) {
+                                const imgUrl = tool.result.match(/plots\/[^\s]+/)?.[0];
+                                if (imgUrl) {
+                                  return (
+                                    <div className="mt-2">
+                                      <InlinePlotViewer
+                                        imageUrl={imgUrl}
+                                        alt={`${tool.name} 结果`}
+                                      />
+                                    </div>
+                                  );
+                                }
+                              }
+
+                              // 默认文本显示
+                              return (
+                                <p className="text-muted-foreground line-clamp-3">
+                                  {tool.result}
+                                </p>
+                              );
+                            })()}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -389,6 +432,23 @@ export function TeachingPage({ onNavigate }: TeachingPageProps) {
                   {text}
                 </button>
               ))}
+              {/* 图像相关快捷按钮 */}
+              {useMCP && selectedKP && (
+                <>
+                  <button
+                    onClick={() => handleQuickAction('能直观地画个图给我看吗？')}
+                    className="px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    📊 画个图
+                  </button>
+                  <button
+                    onClick={() => handleQuickAction('请画出这个函数的图像，标注关键点和间断点')}
+                    className="px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400 hover:bg-blue-500/20 transition-colors"
+                  >
+                    🎯 标注特殊点
+                  </button>
+                </>
+              )}
             </div>
           )}
 
