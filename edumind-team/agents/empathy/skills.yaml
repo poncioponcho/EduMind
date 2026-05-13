@@ -1,0 +1,12 @@
+agent_id: "empathy"
+description: "情感陪伴Agent，监测学生情绪并提供心理支持"
+skills:
+  - name: "analyze_emotion"
+    params:
+      conversation: str
+  - name: "provide_support"
+    params:
+      emotion: str
+      context: str
+can_delegate_to:
+  - tutor

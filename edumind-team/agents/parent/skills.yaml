@@ -1,0 +1,16 @@
+agent_id: "parent_liaison"
+description: "家长联络Agent，定时生成学习日报与周报"
+skills:
+  - name: "generate_daily_report"
+    params:
+      student_id: str
+      date: str
+  - name: "generate_weekly_report"
+    params:
+      student_id: str
+      week_start: str
+  - name: "send_report"
+    params:
+      report: str
+      contact: str
+can_delegate_to: []

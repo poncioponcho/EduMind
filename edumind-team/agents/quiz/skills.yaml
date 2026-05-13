@@ -1,0 +1,14 @@
+agent_id: "quiz_teacher"
+description: "出题教师Agent，基于BKT自适应出题与批改"
+skills:
+  - name: "generate_quiz"
+    params:
+      concept: str
+      student_id: str
+      count: int
+  - name: "grade_answer"
+    params:
+      qid: str
+      answer: str
+can_delegate_to:
+  - tutor

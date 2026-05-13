@@ -1,0 +1,20 @@
+agent_id: "tutor"
+description: "主讲教师Agent，负责概念讲解、学习路径规划与任务委派"
+skills:
+  - name: "explain_concept"
+    params:
+      concept: str
+      level: enum[primary,middle,high,college]
+  - name: "delegate_demo"
+    params:
+      demo_type: enum[code,sim,calc]
+      topic: str
+  - name: "request_quiz"
+    params:
+      concept: str
+      difficulty: enum[easy,med,hard,adaptive]
+      count: int
+can_delegate_to:
+  - lab_assistant
+  - quiz_teacher
+  - empathy

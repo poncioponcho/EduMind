@@ -1,5 +1,5 @@
 from typing import TypedDict, Annotated, Optional
-from langchain_core.messages import add_messages
+from langgraph.graph import add_messages
 
 
 class CognitiveState(TypedDict):

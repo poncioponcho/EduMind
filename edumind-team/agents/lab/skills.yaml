@@ -1,0 +1,15 @@
+agent_id: "lab_assistant"
+description: "实验助教Agent，负责代码执行、数学计算与可视化"
+skills:
+  - name: "run_code"
+    params:
+      code: str
+      lang: enum[python,js]
+  - name: "generate_plot"
+    params:
+      func: str
+      chart_type: enum[line,bar,3d]
+  - name: "solve_math"
+    params:
+      problem: str
+can_delegate_to: []

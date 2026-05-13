@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 
-const COGNITIVE_API = import.meta.env.VITE_COGNITIVE_API_URL || 'http://localhost:8001';
+const COGNITIVE_API = import.meta.env.VITE_COGNITIVE_API_URL || 'http://localhost:8002';
 
 interface Misconception {
   concept: string;

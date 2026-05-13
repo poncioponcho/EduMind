@@ -13,10 +13,11 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("edumind-cognitive")
 
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 _MCP_ROOT = os.path.join(_PROJECT_ROOT, "edumind-mcp")
 
-for p in [_PROJECT_ROOT, _MCP_ROOT]:
+_COGNITIVE_ROOT = os.path.join(_PROJECT_ROOT, "edumind-cognitive")
+for p in [_PROJECT_ROOT, _COGNITIVE_ROOT, _MCP_ROOT]:
     if p not in sys.path and os.path.isdir(p):
         sys.path.insert(0, p)
 
@@ -130,7 +131,7 @@ async def health():
         "status": "ok" if _llm_ready else "degraded",
         "service": "edumind-cognitive",
         "version": "1.0.0",
-        "port": int(os.environ.get("COGNITIVE_PORT", "8001")),
+        "port": int(os.environ.get("COGNITIVE_PORT", "8002")),
         "llm_ready": _llm_ready,
         "init_error": _init_error,
         "kg_concepts": len(kg.get_all_concepts()),
@@ -173,6 +174,84 @@ async def diagnose(req: DiagnoseRequest):
         "misconceptions": misconceptions,
         "prerequisites": prerequisites,
         "missing_prerequisites": kg.get_prerequisite_path(req.topic, req.student_id),
+    }
+
+
+class PlanRequest(BaseModel):
+    student_id: str = "anonymous"
+    diagnosis: Optional[dict] = None
+    topic: Optional[str] = None
+
+
+@app.post("/api/plan")
+async def generate_plan(req: PlanRequest):
+    topic = req.topic or (req.diagnosis or {}).get("topic", "导数")
+    student_id = req.student_id
+
+    misconceptions = kg.get_misconceptions(topic)
+    missing_prereqs = kg.get_prerequisite_path(topic, student_id)
+    mastery = kg.get_student_mastery(student_id, topic)
+
+    steps = []
+    step_order = 1
+
+    for prereq in missing_prereqs:
+        steps.append({
+            "order": step_order,
+            "type": "review",
+            "concept": prereq,
+            "duration_minutes": 3,
+            "description": f"复习前置知识：{prereq}",
+        })
+        step_order += 1
+
+    steps.append({
+        "order": step_order,
+        "type": "concept",
+        "concept": topic,
+        "duration_minutes": 5,
+        "description": f"学习核心概念：{topic}",
+    })
+    step_order += 1
+
+    if misconceptions:
+        for mc in misconceptions[:2]:
+            steps.append({
+                "order": step_order,
+                "type": "example",
+                "concept": topic,
+                "duration_minutes": 3,
+                "description": f"针对常见错误「{mc.get('name', '')}」进行例题演示",
+            })
+            step_order += 1
+
+    steps.append({
+        "order": step_order,
+        "type": "practice",
+        "concept": topic,
+        "duration_minutes": 5,
+        "description": f"练习巩固：{topic}",
+    })
+    step_order += 1
+
+    steps.append({
+        "order": step_order,
+        "type": "summary",
+        "concept": topic,
+        "duration_minutes": 2,
+        "description": f"总结要点：{topic}",
+    })
+
+    total_minutes = sum(s["duration_minutes"] for s in steps)
+    strategy = "前置补强" if missing_prereqs else "直接学习"
+    focus = missing_prereqs[0] if missing_prereqs else topic
+
+    return {
+        "steps": steps,
+        "total_minutes": total_minutes,
+        "strategy": strategy,
+        "focus": focus,
+        "current_step_index": 0,
     }
 
 
@@ -237,5 +316,5 @@ async def teach(req: TeachRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("COGNITIVE_PORT", "8001"))
+    port = int(os.environ.get("COGNITIVE_PORT", "8002"))
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_ROOT/edumind-mcp/.venv"
 ENV_FILE="$PROJECT_ROOT/edumind-mcp/.env"
 

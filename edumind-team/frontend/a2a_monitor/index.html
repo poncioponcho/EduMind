@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EduMind A2A 协作监控面板</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    header {
+      padding: 1rem 2rem;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; color: #38bdf8; }
+    .status { display: flex; gap: 0.75rem; align-items: center; }
+    .badge {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.online { background: #166534; color: #86efac; }
+    .badge.offline { background: #7f1d1d; color: #fca5a5; }
+
+    .container {
+      display: grid;
+      grid-template-columns: 240px 1fr 320px;
+      gap: 1rem;
+      padding: 1rem;
+      height: calc(100vh - 64px);
+    }
+    @media (max-width: 1024px) {
+      .container { grid-template-columns: 1fr; height: auto; }
+    }
+
+    .panel {
+      background: #1e293b;
+      border-radius: 0.5rem;
+      border: 1px solid #334155;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel-header {
+      padding: 0.75rem 1rem;
+      background: #0f172a;
+      border-bottom: 1px solid #334155;
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: #94a3b8;
+    }
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.75rem;
+    }
+
+    .agent-card {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      border-radius: 0.375rem;
+      margin-bottom: 0.5rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      transition: border-color 0.2s;
+    }
+    .agent-card:hover { border-color: #38bdf8; }
+    .agent-icon {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.875rem;
+      font-weight: 700;
+    }
+    .agent-icon.tutor { background: #3b82f6; color: #fff; }
+    .agent-icon.lab { background: #10b981; color: #fff; }
+    .agent-icon.quiz { background: #f59e0b; color: #fff; }
+    .agent-icon.empathy { background: #ec4899; color: #fff; }
+    .agent-icon.parent { background: #8b5cf6; color: #fff; }
+    .agent-info { flex: 1; }
+    .agent-name { font-size: 0.875rem; font-weight: 600; }
+    .agent-role { font-size: 0.75rem; color: #94a3b8; }
+    .agent-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      box-shadow: 0 0 6px;
+    }
+    .agent-dot.online { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+    .agent-dot.busy { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+    .agent-dot.offline { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+    .agent-dot.unknown { background: #6b7280; box-shadow: 0 0 6px #6b7280; }
+
+    .msg-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .msg-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      border-radius: 0.375rem;
+      background: #0f172a;
+      border-left: 3px solid #38bdf8;
+      font-size: 0.8rem;
+      animation: fadeIn 0.3s ease;
+    }
+    .msg-item.delegation { border-left-color: #f59e0b; }
+    .msg-item.error { border-left-color: #ef4444; }
+    .msg-item.broadcast { border-left-color: #8b5cf6; }
+    .msg-item.result { border-left-color: #10b981; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .msg-meta { color: #94a3b8; white-space: nowrap; }
+    .msg-type { font-weight: 600; color: #38bdf8; }
+    .msg-from { color: #f472b6; }
+    .msg-to { color: #34d399; }
+    .msg-content { color: #cbd5e1; word-break: break-all; }
+    .msg-time { font-size: 0.7rem; color: #64748b; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .metric {
+      background: #0f172a;
+      padding: 0.75rem;
+      border-radius: 0.375rem;
+      text-align: center;
+    }
+    .metric-value { font-size: 1.25rem; font-weight: 700; color: #38bdf8; }
+    .metric-label { font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; }
+
+    .controls {
+      padding: 0.75rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+    button {
+      flex: 1;
+      padding: 0.5rem;
+      border: none;
+      border-radius: 0.375rem;
+      background: #334155;
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button:hover { background: #475569; }
+    button.primary { background: #2563eb; }
+    button.primary:hover { background: #1d4ed8; }
+
+    .filter-bar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      background: #0f172a;
+      border-bottom: 1px solid #334155;
+    }
+    .filter-btn {
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 0.7rem;
+    }
+    .filter-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .filter-btn:hover { border-color: #38bdf8; }
+
+    #connection-status {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+    }
+    #connection-status.connected { background: #166534; color: #86efac; }
+    #connection-status.disconnected { background: #7f1d1d; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧠 EduMind A2A 协作监控面板</h1>
+    <div class="status">
+      <span id="connection-status" class="disconnected">WS 未连接</span>
+      <span class="badge online" id="agent-count-badge">5 Agents Online</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Left: Agent list -->
+    <div class="panel">
+      <div class="panel-header">Agent 状态</div>
+      <div class="panel-body" id="agent-list"></div>
+    </div>
+
+    <!-- Center: Message flow -->
+    <div class="panel">
+      <div class="panel-header">A2A 消息流</div>
+      <div class="filter-bar">
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">全部</button>
+        <button class="filter-btn" data-filter="delegation" onclick="setFilter('delegation', this)">委派</button>
+        <button class="filter-btn" data-filter="result" onclick="setFilter('result', this)">结果</button>
+        <button class="filter-btn" data-filter="error" onclick="setFilter('error', this)">错误</button>
+        <button class="filter-btn" data-filter="broadcast" onclick="setFilter('broadcast', this)">广播</button>
+      </div>
+      <div class="panel-body">
+        <div class="controls">
+          <button onclick="clearFlow()">清空</button>
+          <button class="primary" onclick="loadHistory()">加载历史</button>
+        </div>
+        <div class="msg-flow" id="msg-flow"></div>
+      </div>
+    </div>
+
+    <!-- Right: Metrics -->
+    <div class="panel">
+      <div class="panel-header">实时指标</div>
+      <div class="panel-body">
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-value" id="metric-messages">0</div>
+            <div class="metric-label">消息总数</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value" id="metric-tasks">0</div>
+            <div class="metric-label">任务数</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value" id="metric-delegations">0</div>
+            <div class="metric-label">委派次数</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value" id="metric-emotions">0</div>
+            <div class="metric-label">情感介入</div>
+          </div>
+        </div>
+        <div style="margin-top:1rem; padding:0.75rem; background:#0f172a; border-radius:0.375rem; font-size:0.8rem; color:#94a3b8;">
+          <strong style="color:#e2e8f0;">使用说明</strong><br>
+          1. 启动 edumind-team/api/server.py<br>
+          2. 打开 http://localhost:8001/monitor<br>
+          3. 所有Agent间A2A通信将实时显示
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AGENTS = [
+      { id: 'tutor', name: '主讲教师', role: '概念讲解 / 委派协调', cls: 'tutor' },
+      { id: 'lab_assistant', name: '实验助教', role: '代码执行 / 可视化', cls: 'lab' },
+      { id: 'quiz_teacher', name: '出题教师', role: 'BKT自适应出题', cls: 'quiz' },
+      { id: 'empathy', name: '情感陪伴', role: '情绪监测 / 心理支持', cls: 'empathy' },
+      { id: 'parent_liaison', name: '家长联络', role: '日报 / 周报生成', cls: 'parent' },
+    ];
+
+    const agentListEl = document.getElementById('agent-list');
+    const msgFlowEl = document.getElementById('msg-flow');
+    const statusEl = document.getElementById('connection-status');
+    let messageCount = 0;
+    let taskCount = 0;
+    let delegationCount = 0;
+    let emotionCount = 0;
+    let currentFilter = 'all';
+    let allMessages = [];
+
+    function setFilter(filter, btn) {
+      currentFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderMessages();
+    }
+
+    function renderMessages() {
+      msgFlowEl.innerHTML = '';
+      const filtered = currentFilter === 'all'
+        ? allMessages
+        : allMessages.filter(m => m.msg_type === currentFilter);
+      filtered.slice(-200).forEach(m => addMessageDOM(m));
+    }
+
+    function renderAgents() {
+      agentListEl.innerHTML = AGENTS.map(a => `
+        <div class="agent-card" id="agent-${a.id}">
+          <div class="agent-icon ${a.cls}">${a.name[0]}</div>
+          <div class="agent-info">
+            <div class="agent-name">${a.name}</div>
+            <div class="agent-role">${a.role}</div>
+          </div>
+          <div class="agent-dot unknown" id="dot-${a.id}"></div>
+        </div>
+      `).join('');
+    }
+
+    function updateAgentStatus(agentStatus) {
+      let onlineCount = 0;
+      for (const [aid, status] of Object.entries(agentStatus)) {
+        const dot = document.getElementById(`dot-${aid}`);
+        if (dot) {
+          dot.className = `agent-dot ${status}`;
+          if (status === 'online' || status === 'busy') onlineCount++;
+        }
+      }
+      const badge = document.getElementById('agent-count-badge');
+      badge.textContent = `${onlineCount} Agents Online`;
+      badge.className = onlineCount > 0 ? 'badge online' : 'badge offline';
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function addMessage(msg) {
+      allMessages.push(msg);
+      if (allMessages.length > 500) allMessages = allMessages.slice(-500);
+
+      if (currentFilter === 'all' || msg.msg_type === currentFilter) {
+        addMessageDOM(msg);
+      }
+
+      messageCount++;
+      document.getElementById('metric-messages').textContent = messageCount;
+      if (msg.msg_type === 'task_request' || msg.msg_type === 'delegation') {
+        taskCount++;
+        document.getElementById('metric-tasks').textContent = taskCount;
+        if (msg.msg_type === 'delegation') {
+          delegationCount++;
+          document.getElementById('metric-delegations').textContent = delegationCount;
+        }
+      }
+      if (msg.to_agent === 'empathy' || (msg.from_agent === 'empathy' && msg.msg_type === 'result')) {
+        emotionCount++;
+        document.getElementById('metric-emotions').textContent = emotionCount;
+      }
+    }
+
+    function addMessageDOM(msg) {
+      const el = document.createElement('div');
+      const typeClass = msg.msg_type === 'delegation' ? 'delegation'
+        : msg.msg_type === 'error' ? 'error'
+        : msg.msg_type === 'broadcast' ? 'broadcast'
+        : msg.msg_type === 'result' ? 'result'
+        : '';
+      el.className = `msg-item ${typeClass}`;
+      const contentPreview = JSON.stringify(msg.content).slice(0, 180);
+      el.innerHTML = `
+        <div class="msg-meta">
+          <span class="msg-type">${msg.msg_type}</span><br>
+          <span class="msg-from">${msg.from_agent}</span>
+          →
+          <span class="msg-to">${msg.to_agent}</span><br>
+          <span class="msg-time">${formatTime(msg.timestamp)}</span>
+        </div>
+        <div class="msg-content">${contentPreview}${contentPreview.length >= 180 ? '...' : ''}</div>
+      `;
+      msgFlowEl.prepend(el);
+      if (msgFlowEl.children.length > 200) {
+        msgFlowEl.lastElementChild.remove();
+      }
+    }
+
+    function clearFlow() {
+      msgFlowEl.innerHTML = '';
+      allMessages = [];
+      messageCount = 0;
+      taskCount = 0;
+      delegationCount = 0;
+      emotionCount = 0;
+      document.getElementById('metric-messages').textContent = '0';
+      document.getElementById('metric-tasks').textContent = '0';
+      document.getElementById('metric-delegations').textContent = '0';
+      document.getElementById('metric-emotions').textContent = '0';
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/a2a/history?limit=50');
+        const data = await res.json();
+        allMessages = [];
+        (data.history || []).forEach(addMessage);
+      } catch (e) {
+        console.error('Failed to load history', e);
+      }
+    }
+
+    async function fetchAgentStatus() {
+      try {
+        const res = await fetch('/api/agents');
+        const data = await res.json();
+        const metricsRes = await fetch('/api/health');
+        const health = await metricsRes.json();
+        if (health.agent_status) {
+          updateAgentStatus(health.agent_status);
+        }
+      } catch (e) {
+        // Silently fail
+      }
+    }
+
+    function connectWS() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/monitor`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        statusEl.textContent = 'WS 已连接';
+        statusEl.className = 'connected';
+        loadHistory();
+        fetchAgentStatus();
+      };
+
+      ws.onmessage = (ev) => {
+        const payload = JSON.parse(ev.data);
+        if (payload.type === 'a2a_message') {
+          addMessage(payload.data);
+        } else if (payload.type === 'agent_status') {
+          updateAgentStatus(payload.data);
+        }
+      };
+
+      ws.onclose = () => {
+        statusEl.textContent = 'WS 未连接';
+        statusEl.className = 'disconnected';
+        setTimeout(connectWS, 3000);
+      };
+
+      ws.onerror = () => {
+        statusEl.textContent = 'WS 错误';
+        statusEl.className = 'disconnected';
+      };
+    }
+
+    renderAgents();
+    connectWS();
+    setInterval(fetchAgentStatus, 10000);
+  </script>
+</body>
+</html>

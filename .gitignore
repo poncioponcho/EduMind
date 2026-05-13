@@ -33,3 +33,5 @@ assets/plots/
 __pycache__/
 *.pyc
 .venv/
+data/
+*.png

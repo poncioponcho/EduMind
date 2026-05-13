@@ -14,7 +14,8 @@ except ImportError:
     pass
 
 _COGNITIVE_ROOT = os.path.dirname(os.path.dirname(__file__))
-_MCP_ROOT = os.path.join(_COGNITIVE_ROOT, "edumind-mcp")
+_PROJECT_ROOT = os.path.dirname(_COGNITIVE_ROOT)
+_MCP_ROOT = os.path.join(_PROJECT_ROOT, "edumind-mcp")
 
 if _MCP_ROOT not in sys.path:
     sys.path.insert(0, _MCP_ROOT)
@@ -23,7 +24,7 @@ if _COGNITIVE_ROOT not in sys.path:
 
 from langgraph.graph import StateGraph as _StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.state import CognitiveState
+from cognitive_workflow.state import CognitiveState
 from agents.diagnoser import diagnoser_node
 from agents.planner import planner_node
 from agents.tutor import tutor_node

@@ -1485,7 +1485,7 @@ func main() {
 	}
 
 	r.GET("/ws/agents", orchestrator.handleWebSocket)
-	r.Static("/", "./static")
+	r.Static("/static", "./static")
 
 	log.Println("EduMind Agent调度网关启动于 :8080")
 	log.Println("API文档:")
