@@ -20,55 +20,173 @@ const LATEX_COMMANDS = [
   'mapsto', 'hookrightarrow', 'uparrow', 'downarrow',
   'quad', 'qquad',
   'begin', 'end', 'text', 'mathrm', 'textbf', 'textit',
+  'displaystyle', 'textstyle', 'dfrac', 'tfrac',
+  'overline', 'underline', 'overbrace', 'underbrace',
+  'xrightarrow', 'xleftarrow',
+];
+
+const LATEX_ENVIRONMENTS = [
+  'equation', 'align', 'aligned', 'gather', 'gathered',
+  'cases', 'matrix', 'pmatrix', 'bmatrix', 'vmatrix',
+  'array', 'tabular', 'itemize', 'enumerate',
 ];
 
 const BARE_LATEX_PATTERN = new RegExp(
   '\\\\(?:' + LATEX_COMMANDS.join('|') + ')\\b',
-  'g'
 );
+
+const LATEX_ENV_PATTERN = new RegExp(
+  '\\\\begin\\{(?:' + LATEX_ENVIRONMENTS.join('|') + ')\\}',
+);
+
+function containsBareLatex(text: string): boolean {
+  return BARE_LATEX_PATTERN.test(text) || LATEX_ENV_PATTERN.test(text);
+}
+
+function findLatexExtent(text: string, startIdx: number): number {
+  let depth = 0;
+  let i = startIdx;
+  let lastContentIdx = startIdx;
+
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (ch === '{') {
+      depth++;
+      lastContentIdx = i;
+    } else if (ch === '}') {
+      depth--;
+      lastContentIdx = i;
+      if (depth <= 0) {
+        return i + 1;
+      }
+    } else if (ch === '\\' && i + 1 < text.length) {
+      lastContentIdx = i;
+      const nextCh = text[i + 1];
+      if (nextCh === '[' || nextCh === '(') {
+        depth++;
+        i += 2;
+        continue;
+      }
+      if (nextCh === ']' || nextCh === ')') {
+        depth--;
+        i += 2;
+        continue;
+      }
+      i += 2;
+      continue;
+    } else if (ch === '_' || ch === '^') {
+      lastContentIdx = i;
+      if (i + 1 < text.length && text[i + 1] === '{') {
+        i += 2;
+        depth++;
+        continue;
+      }
+    } else if (ch === '\n' && depth <= 0) {
+      const nextLine = text.substring(i + 1).trimStart();
+      if (nextLine.startsWith('\\') || nextLine.startsWith('$') || nextLine === '') {
+        break;
+      }
+    }
+
+    i++;
+  }
+
+  return Math.max(lastContentIdx + 1, startIdx + 1);
+}
 
 export function autoWrapMath(text: string): string {
   if (!text) return text;
 
-  const blockMathRegex = /\$\$([\s\S]*?)\$\$/g;
-  const inlineMathRegex = /\$([^\$]+?)\$/g;
-
   let result = text;
 
-  result = result.replace(blockMathRegex, (_, content) => {
-    return `$$${content}$$`;
-  });
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (match) => match);
+  result = result.replace(/\$([^\$]+?)\$/g, (match) => match);
 
-  result = result.replace(inlineMathRegex, (_, content) => {
-    return `$${content}$`;
-  });
+  const lines = result.split('\n');
+  const processedLines: string[] = [];
 
-  const parts = result.split(/(\$\$[\s\S]*?\$\$|\$[^\$]+?\$)/g);
+  for (let li = 0; li < lines.length; li++) {
+    let line = lines[li];
 
-  const processed = parts.map(part => {
-    if (part.startsWith('$$') || (part.startsWith('$') && !part.startsWith('$$'))) {
-      return part;
+    if (line.trim().startsWith('$$') || line.trim().startsWith('$')) {
+      processedLines.push(line);
+      continue;
     }
 
-    if (!BARE_LATEX_PATTERN.test(part)) {
-      BARE_LATEX_PATTERN.lastIndex = 0;
-      return part;
-    }
-    BARE_LATEX_PATTERN.lastIndex = 0;
-
-    const segments = part.split(/(\s*[.,;:!?)\]]\s*)/g);
-    const wrapped = segments.map(seg => {
-      if (BARE_LATEX_PATTERN.test(seg)) {
-        BARE_LATEX_PATTERN.lastIndex = 0;
-        return `$${seg}$`;
+    if (/^\s*[-*•]\s/.test(line) || /^\s*\d+[.)]\s/.test(line)) {
+      const prefix = line.match(/^(\s*[-*•]\s|\s*\d+[.)]\s)/)?.[1] || '';
+      const content = line.substring(prefix.length);
+      if (containsBareLatex(content)) {
+        processedLines.push(prefix + wrapLatexInLine(content));
+      } else {
+        processedLines.push(line);
       }
-      BARE_LATEX_PATTERN.lastIndex = 0;
-      return seg;
-    });
-    return wrapped.join('');
-  });
+      continue;
+    }
 
-  return processed.join('');
+    if (containsBareLatex(line)) {
+      processedLines.push(wrapLatexInLine(line));
+    } else {
+      processedLines.push(line);
+    }
+  }
+
+  return processedLines.join('\n');
+}
+
+function wrapLatexInLine(line: string): string {
+  let result = '';
+  let remaining = line;
+
+  while (remaining.length > 0) {
+    const match = remaining.match(BARE_LATEX_PATTERN) || remaining.match(LATEX_ENV_PATTERN);
+
+    if (!match || match.index === undefined) {
+      result += remaining;
+      break;
+    }
+
+    if (match.index > 0) {
+      const before = remaining.substring(0, match.index);
+      result += before;
+    }
+
+    const startIdx = match.index;
+    const endIdx = findLatexExtent(remaining, startIdx);
+
+    let latexBlock = remaining.substring(startIdx, endIdx);
+
+    let scanBack = result.length - 1;
+    while (scanBack >= 0 && result[scanBack] === ' ') scanBack--;
+    if (scanBack >= 0 && result[scanBack] === '=') {
+      while (scanBack >= 0 && (result[scanBack] === '=' || result[scanBack] === ' ')) {
+        latexBlock = result[scanBack] + latexBlock;
+        scanBack--;
+      }
+      result = result.substring(0, scanBack + 1);
+    }
+
+    let scanFwd = endIdx;
+    while (scanFwd < remaining.length && remaining[scanFwd] === ' ') scanFwd++;
+    if (scanFwd < remaining.length && (remaining[scanFwd] === '=' || remaining[scanFwd] === '+' || remaining[scanFwd] === '-')) {
+      while (scanFwd < remaining.length && (remaining[scanFwd] === '=' || remaining[scanFwd] === ' ' || remaining[scanFwd] === '+' || remaining[scanFwd] === '-')) {
+        latexBlock += remaining[scanFwd];
+        scanFwd++;
+      }
+      remaining = remaining.substring(scanFwd);
+    } else {
+      remaining = remaining.substring(endIdx);
+    }
+
+    if (latexBlock.includes('\n') || latexBlock.includes('\\begin{') || latexBlock.length > 40) {
+      result += `$$${latexBlock}$$`;
+    } else {
+      result += `$${latexBlock}$`;
+    }
+  }
+
+  return result;
 }
 
 export function formatQuestionContent(content: string): string {
@@ -76,21 +194,66 @@ export function formatQuestionContent(content: string): string {
 
   let result = content;
 
-  result = result.replace(/\\\\frac/g, '\\frac');
-  result = result.replace(/\\\\int/g, '\\int');
-  result = result.replace(/\\\\lim/g, '\\lim');
-  result = result.replace(/\\\\sum/g, '\\sum');
-  result = result.replace(/\\\\sqrt/g, '\\sqrt');
-  result = result.replace(/\\\\sin/g, '\\sin');
-  result = result.replace(/\\\\cos/g, '\\cos');
-  result = result.replace(/\\\\ln/g, '\\ln');
-  result = result.replace(/\\\\pi/g, '\\pi');
-  result = result.replace(/\\\\alpha/g, '\\alpha');
-  result = result.replace(/\\\\to/g, '\\to');
-  result = result.replace(/\\\\infty/g, '\\infty');
-  result = result.replace(/\\\\cdot/g, '\\cdot');
-  result = result.replace(/\\\\left/g, '\\left');
-  result = result.replace(/\\\\right/g, '\\right');
+  const doubleEscaped: Record<string, string> = {
+    '\\\\frac': '\\frac',
+    '\\\\int': '\\int',
+    '\\\\lim': '\\lim',
+    '\\\\sum': '\\sum',
+    '\\\\sqrt': '\\sqrt',
+    '\\\\sin': '\\sin',
+    '\\\\cos': '\\cos',
+    '\\\\tan': '\\tan',
+    '\\\\ln': '\\ln',
+    '\\\\log': '\\log',
+    '\\\\exp': '\\exp',
+    '\\\\pi': '\\pi',
+    '\\\\alpha': '\\alpha',
+    '\\\\beta': '\\beta',
+    '\\\\gamma': '\\gamma',
+    '\\\\delta': '\\delta',
+    '\\\\theta': '\\theta',
+    '\\\\to': '\\to',
+    '\\\\infty': '\\infty',
+    '\\\\cdot': '\\cdot',
+    '\\\\left': '\\left',
+    '\\\\right': '\\right',
+    '\\\\displaystyle': '\\displaystyle',
+    '\\\\text': '\\text',
+    '\\\\mathrm': '\\mathrm',
+    '\\\\begin': '\\begin',
+    '\\\\end': '\\end',
+    '\\\\quad': '\\quad',
+    '\\\\partial': '\\partial',
+    '\\\\nabla': '\\nabla',
+    '\\\\leq': '\\leq',
+    '\\\\geq': '\\geq',
+    '\\\\neq': '\\neq',
+    '\\\\approx': '\\approx',
+    '\\\\equiv': '\\equiv',
+    '\\\\forall': '\\forall',
+    '\\\\exists': '\\exists',
+    '\\\\emptyset': '\\emptyset',
+    '\\\\rightarrow': '\\rightarrow',
+    '\\\\leftarrow': '\\leftarrow',
+    '\\\\Rightarrow': '\\Rightarrow',
+    '\\\\Leftarrow': '\\Leftarrow',
+    '\\\\mapsto': '\\mapsto',
+    '\\\\overline': '\\overline',
+    '\\\\underline': '\\underline',
+    '\\\\hat': '\\hat',
+    '\\\\bar': '\\bar',
+    '\\\\vec': '\\vec',
+    '\\\\dot': '\\dot',
+    '\\\\tilde': '\\tilde',
+    '\\\\mathbb': '\\mathbb',
+    '\\\\mathbf': '\\mathbf',
+    '\\\\mathcal': '\\mathcal',
+    '\\\\overrightarrow': '\\overrightarrow',
+  };
+
+  for (const [from, to] of Object.entries(doubleEscaped)) {
+    result = result.replace(new RegExp(from.replace(/\\\\/g, '\\\\\\\\'), 'g'), to);
+  }
 
   return result;
 }
