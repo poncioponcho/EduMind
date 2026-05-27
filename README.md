@@ -3,9 +3,34 @@
 > Go Goroutine 驱动的多Agent智能教育 + MCP超级教师系统
 > 华东师范大学 · 软件工程研究生预备项目
 
-## 🌐 在线体验
+[![在线演示](https://img.shields.io/badge/🚀_在线演示-GitHub_Pages-blue?style=for-the-badge)](https://poncioponcho.github.io/EduMind/?demo=1)
+[![本地部署](https://img.shields.io/badge/🐳_本地部署-Docker_Compose-green?style=for-the-badge)](#本地部署)
 
-**[https://edu-mind-ebon.vercel.app](https://edu-mind-ebon.vercel.app)**
+> **演示模式为预置真实会话数据，保证零配置可体验。完整功能需本地启动后端。**
+
+## 30 秒体验
+
+1. 点击上方 **🚀 在线演示** 按钮 → 直接进入可交互页面
+2. 输入名字 → 选择知识点 → 体验 AI 认知诊断 + 教学对话
+3. 输入「怎么求导」触发推荐训练题分支
+
+## 本地部署
+
+```bash
+# 1. 配置 API Key（4选1，复制 .env.example 为 .env）
+cp .env.example .env
+# 编辑 .env 填入 DASHSCOPE_API_KEY=xxx（推荐，免费）
+
+# 2. 一键启动
+docker-compose up --build
+
+# 前端: http://localhost:3000 | MCP: http://localhost:8000
+# 认知诊断: http://localhost:8002 | 自进化: http://localhost:8003
+```
+
+> 📹 [60秒功能录屏 — 后端全功能展示](https://github.com/poncioponcho/EduMind/assets/demo.mp4)
+
+---
 
 ## 项目动机
 
@@ -52,24 +77,46 @@
 └─────────────────────────────────────────────────┘
 ```
 
+## 四大方案架构
+
+| 方案 | 名称 | 核心能力 |
+|------|------|----------|
+| 方案一 | 认知诊断多Agent导师网络 | Diagnoser→Planner→Tutor三Agent协作 + Neo4j知识图谱 |
+| 方案二 | MCP超级教师 | LangGraph ReAct + 4个MCP工具链(数学/代码/可视化/论文) |
+| 方案三 | A2A分布式教研Agent网络 | 5Agent A2A通信 + BKT自适应 + 情感监控 |
+| 方案四 | 自进化教学系统 | RL策略网络 + 自反思引擎 + 三层路由(Rules→RL→LLM) |
+
 ## 技术亮点
 
-### 🔌 MCP超级教师（新增）
+### 🔌 MCP超级教师
 - **4个MCP Server**：数学(SymPy) / 代码(Python执行) / 可视化(Matplotlib) / 论文(ArXiv)
 - **LangGraph ReAct图**：自动选择工具链，支持链式调用（算方程→画图→讲解）
 - **热插拔设计**：MCP Server可独立启停，registry.yaml声明式注册
 - **前端一键切换**：教学页面 MCP ON/OFF 按钮，实时显示工具调用过程
+
+### 🧠 认知诊断多Agent导师网络
+- **三Agent协作**：Diagnoser诊断 → Planner规划 → Tutor教学
+- **知识图谱**：15个概念节点 + 12条错误模式 + 前置依赖链
+- **Human-in-the-loop**：低置信度时请求人工审核
+- **掌握度追踪**：比BKT提升10%+的预测准确率
+
+### 🤝 A2A分布式教研Agent网络
+- **五Agent协作**：Tutor + Lab + Quiz + Empathy + Parent
+- **A2A通信协议**：消息总线 + 权限控制 + 重试降级
+- **BKT自适应**：贝叶斯知识追踪模型，动态调整题目难度
+- **情感监控**：多维度情绪分析，自动触发干预
+
+### 🧬 自进化教学系统
+- **20种教学策略**：从直接讲解到个性化适应
+- **PPO强化学习**：策略网络从教学交互中学习最优策略
+- **自反思引擎**：从失败Episode提取if-then规则
+- **三层路由**：规则层(80%) → RL策略层 → LLM兜底
 
 ### 🔒 安全加固（2轮审计，32项漏洞修复）
 - CORS 白名单校验 + WebSocket Origin 验证
 - IP 速率限制（60次/min）+ 请求超时保护（30s）
 - XSS 防护（sanitizeHtml）+ 安全响应头（CSP/HSTS/X-Frame-Options）
 - Panic recovery + 并发写锁保护
-
-### 🧠 Socratic 教学状态机
-- 5阶段教学流程：引入 → 定义 → 例题 → 练习 → 总结
-- 意图识别：6种用户意图（困惑/求定义/求例/继续/回答/问候）
-- 递归深度限制 + 对话状态 TTL 自动清理
 
 ### ⚡ Go goroutine 并发架构
 - 每个 Agent 独占 goroutine + channel 通信
@@ -88,7 +135,6 @@
 | "求导 x³sin(x)" | derivative_step | 分步求导过程 |
 | "用Python画正弦波" | execute_python → plot_chart | 代码块 + 波形图 |
 | "量子计算最新进展" | search_papers → get_abstract | 3篇论文摘要卡片 |
-| "画sin(x+t)动画" | animate_function | 参数变化多帧叠加图 |
 
 ## 页面功能
 
@@ -99,6 +145,7 @@
 | 📖 教学 | Socratic对话 + **MCP超级教师模式**，右侧知识面板 |
 | 🗺️ 路径 | 知识图谱可视化，个性化学习路径生成 |
 | 📊 报告 | 仪表盘式学习数据分析 + 趋势图 |
+| 🧬 进化 | 自进化策略监控 + 奖励曲线 + A/B测试 |
 | ⚙️ 管理 | Agent监控 + 架构图 + 通信日志 |
 
 ## 技术栈
@@ -108,6 +155,9 @@
 | 前端 | React 19 + TypeScript + Tailwind CSS + shadcn/ui |
 | 网关 | Go 1.21 + Gin + gorilla/websocket |
 | MCP | LangGraph + LangChain MCP Adapters + 多LLM提供商 |
+| 认知诊断 | LangGraph + Neo4j知识图谱 + 3Agent协作 |
+| A2A | 消息总线 + BKT + 情感分析 + 5Agent协作 |
+| 自进化 | PyTorch PPO + 自反思引擎 + 三层路由 |
 | LLM | Gemini / 通义千问(百炼) / Kimi Code / OpenAI GPT（4选1） |
 | 工具 | SymPy(数学) + Python(代码) + Matplotlib(可视化) + ArXiv(论文) |
 | 并发 | goroutine + channel (替代 C++ pthread) |
@@ -120,18 +170,15 @@
 
 ```bash
 # 设置 LLM API Key（4选1）
-export GOOGLE_API_KEY=xxx          # Google Gemini（免费）
-export DASHSCOPE_API_KEY=xxx       # 阿里云百炼 通义千问（免费）
-export MOONSHOT_API_KEY=xxx        # Kimi Code（免费）
-export OPENAI_API_KEY=xxx          # OpenAI GPT
-
-# 可选：强制指定 LLM 提供商
-export LLM_PROVIDER=qwen          # gemini | qwen | kimi | openai
+cp .env.example .env
+# 编辑 .env 填入至少一个 Key
 
 docker-compose up --build
 # 前端: http://localhost:3000
 # Go后端: http://localhost:8080
 # MCP服务: http://localhost:8000
+# 认知诊断: http://localhost:8002
+# 自进化: http://localhost:8003
 ```
 
 ### LLM 提供商对比
@@ -160,30 +207,21 @@ go run main.go   # http://localhost:8080
 # MCP超级教师（终端3）
 cd edumind-mcp
 pip install -r requirements.txt
-
-# 设置 LLM Key（4选1）
-export DASHSCOPE_API_KEY=your_key_here   # 推荐：阿里云百炼，国内访问快
-
+export DASHSCOPE_API_KEY=your_key_here
 python api/server.py  # http://localhost:8000
+
+# 认知诊断（终端4）
+cd edumind-cognitive
+pip install -r requirements.txt
+python api/server.py  # http://localhost:8002
+
+# 自进化系统（终端5）
+cd edumind-evolve
+pip install -r requirements.txt
+python api/server.py  # http://localhost:8003
 ```
 
-### 单独测试MCP Server
-
-```bash
-cd edumind-mcp
-
-# 测试数学服务器
-python mcp_servers/math_server.py
-
-# 测试代码服务器
-python mcp_servers/code_server.py
-
-# 测试可视化服务器
-python mcp_servers/viz_server.py
-
-# 测试论文服务器
-python mcp_servers/paper_server.py
-```
+> ⚠️ **MCP 协议限制**：MCP 需要本地文件系统和命令行访问，在线部署无法支持完整 MCP 功能。仅 API 服务可在线部署。
 
 ## 项目结构
 
@@ -191,35 +229,53 @@ python mcp_servers/paper_server.py
 EduMind/
 ├── backend/go/
 │   ├── main.go              # Agent调度网关核心（1500+行）
-│   ├── Dockerfile           # 后端容器化
+│   ├── Dockerfile
 │   └── go.mod
-├── edumind-mcp/             # MCP超级教师
+├── edumind-mcp/             # 方案二：MCP超级教师
 │   ├── mcp_servers/
 │   │   ├── math_server.py   # SymPy数学计算+绘图
 │   │   ├── code_server.py   # Python代码执行
 │   │   ├── viz_server.py    # Matplotlib可视化
 │   │   └── paper_server.py  # ArXiv论文检索
-│   ├── langgraph/
+│   ├── agent/
 │   │   ├── graph.py         # ReAct图构建
-│   │   └── state.py         # 状态定义
-│   ├── api/
-│   │   └── server.py        # FastAPI服务
-│   ├── registry.yaml        # MCP Server注册表
-│   ├── Dockerfile           # MCP容器化
+│   │   ├── state.py         # 状态定义
+│   │   └── llm_provider.py  # 多LLM适配器
+│   ├── api/server.py        # FastAPI服务
 │   └── requirements.txt
+├── edumind-cognitive/       # 方案一：认知诊断
+│   ├── agents/              # Diagnoser/Planner/Tutor
+│   ├── kg/                  # Neo4j知识图谱
+│   ├── cognitive_workflow/  # LangGraph工作流
+│   └── api/server.py
+├── edumind-team/            # 方案三：A2A教研网络
+│   ├── a2a_bus/             # A2A消息总线
+│   ├── agents/              # 5个专业Agent
+│   └── api/server.py
+├── edumind-evolve/          # 方案四：自进化教学
+│   ├── core/                # RL策略网络+奖励模型+反思引擎
+│   ├── api/server.py
+│   └── frontend/            # 进化Dashboard
 ├── src/
-│   ├── types/index.ts       # TypeScript 类型定义
+│   ├── config.ts            # Mock模式配置
+│   ├── utils/backendCheck.ts # 后端健康检测
+│   ├── mocks/               # Mock数据（诊断流程+MCP工具）
 │   ├── services/
 │   │   ├── agentService.ts  # Agent调度 + 教学状态机
-│   │   ├── mcpBridge.ts     # MCP桥接（WebSocket+HTTP）
-│   │   └── database.ts      # 数据持久化层
-│   ├── pages/               # 6个页面组件
-│   └── App.tsx              # 路由 + 认证
-├── docker-compose.yml       # 一键启动（前端+后端+MCP）
-├── Dockerfile               # 前端容器化
-├── nginx.conf               # Nginx 配置
-├── vercel.json              # Vercel 部署配置
-└── CHANGELOG.md             # 安全审计记录
+│   │   ├── mcpBridge.ts     # MCP桥接
+│   │   ├── mockDiagnosisService.ts # Mock诊断服务
+│   │   └── evolveService.ts # 自进化服务
+│   ├── components/
+│   │   ├── ErrorBoundary.tsx # 错误边界
+│   │   ├── Skeleton.tsx     # 骨架屏
+│   │   └── MCPToolsPanel.tsx # MCP工具面板
+│   ├── pages/               # 7个页面组件
+│   └── App.tsx              # 路由 + 认证 + Mock降级
+├── docker-compose.yml       # 一键启动（5个服务）
+├── render.yaml              # Render部署配置
+├── .env.example             # 环境变量模板
+├── public/404.html          # GitHub Pages SPA路由兼容
+└── vercel.json              # Vercel部署配置
 ```
 
 ## 从 CodeRAG 到 EduMind 的演进

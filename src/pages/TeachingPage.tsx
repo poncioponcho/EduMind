@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { MathContent } from '@/components/MathContent';
 import { CognitivePanel } from '@/components/CognitivePanel';
-import { FunctionPlotViewer, InlinePlotViewer, extractPlotDataFromResponse, isPlotRequest } from '@/services/plotService';
+import { FunctionPlotViewer, InlinePlotViewer, extractPlotDataFromResponse } from '@/services/plotService';
 import { sendTeachingMessage, getAgentStates, subscribeToAgentStates, getAgentColor, getAgentName } from '@/services/agentService';
 import { mcpBridge } from '@/services/mcpBridge';
 import { getKnowledgePoints, getQuestionsByKnowledgePoint } from '@/services/database';

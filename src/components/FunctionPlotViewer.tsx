@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-interface SpecialPoint {
+export interface SpecialPoint {
   x: number;
   y: number;
   type: 'open' | 'filled' | 'arrow';

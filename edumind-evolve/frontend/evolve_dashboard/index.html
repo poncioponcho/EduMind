@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EduMind 自进化教学系统 Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0e1a; color: #e2e8f0; }
+    header { padding: 1rem 2rem; background: #111827; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.2rem; color: #22d3ee; }
+    .badge { padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+    .badge.on { background: #065f46; color: #6ee7b7; }
+    .badge.off { background: #7f1d1d; color: #fca5a5; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; padding: 1rem; }
+    @media (max-width: 1024px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+    .card { background: #111827; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 1rem; }
+    .card-title { font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card-value { font-size: 1.8rem; font-weight: 700; }
+    .card-value.cyan { color: #22d3ee; }
+    .card-value.green { color: #4ade80; }
+    .card-value.yellow { color: #facc15; }
+    .card-value.pink { color: #f472b6; }
+    .card-sub { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+    .panel { grid-column: span 2; }
+    @media (max-width: 1024px) { .panel { grid-column: span 2; } }
+    .full { grid-column: span 4; }
+    @media (max-width: 1024px) { .full { grid-column: span 2; } }
+    .reward-chart { height: 200px; display: flex; align-items: flex-end; gap: 2px; padding-top: 1rem; }
+    .bar { flex: 1; min-width: 3px; background: #22d3ee; border-radius: 2px 2px 0 0; transition: height 0.3s; }
+    .bar.neg { background: #f87171; }
+    .strategy-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; }
+    .strat-item { background: #0a0e1a; padding: 0.5rem; border-radius: 0.375rem; text-align: center; font-size: 0.7rem; border: 1px solid #1e293b; }
+    .strat-item.active { border-color: #22d3ee; background: #0c2d3e; }
+    .strat-id { font-weight: 700; font-size: 0.9rem; color: #22d3ee; }
+    .strat-name { color: #94a3b8; margin-top: 0.2rem; }
+    .rule-list { max-height: 200px; overflow-y: auto; }
+    .rule-item { padding: 0.5rem; margin-bottom: 0.4rem; background: #0a0e1a; border-radius: 0.375rem; border-left: 3px solid #facc15; font-size: 0.75rem; }
+    .rule-cond { color: #facc15; font-weight: 600; }
+    .rule-then { color: #94a3b8; }
+    .router-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+    .router-seg { display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: 600; color: #fff; }
+    .router-seg.rule { background: #4ade80; }
+    .router-seg.rl { background: #22d3ee; }
+    .router-seg.llm { background: #a78bfa; }
+    .legend { display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.7rem; }
+    .legend-item { display: flex; align-items: center; gap: 0.3rem; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .controls { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    button { padding: 0.4rem 0.8rem; border: none; border-radius: 0.375rem; background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 0.75rem; }
+    button:hover { background: #334155; }
+    button.primary { background: #0891b2; }
+    button.primary:hover { background: #0e7490; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧬 EduMind 自进化教学系统</h1>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <span class="badge off" id="ws-status">WS 未连接</span>
+      <span class="badge on" id="sys-status">系统就绪</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">总交互步数</div>
+      <div class="card-value cyan" id="v-steps">0</div>
+      <div class="card-sub">训练步数</div>
+    </div>
+    <div class="card">
+      <div class="card-title">训练轮次</div>
+      <div class="card-value green" id="v-trains">0</div>
+      <div class="card-sub">PPO更新次数</div>
+    </div>
+    <div class="card">
+      <div class="card-title">最佳奖励</div>
+      <div class="card-value yellow" id="v-best">-</div>
+      <div class="card-sub">历史最高</div>
+    </div>
+    <div class="card">
+      <div class="card-title">进化规则数</div>
+      <div class="card-value pink" id="v-rules">0</div>
+      <div class="card-sub">自反思提取</div>
+    </div>
+
+    <div class="card panel">
+      <div class="card-title">奖励曲线 (最近100)</div>
+      <div class="reward-chart" id="reward-chart"></div>
+    </div>
+    <div class="card panel">
+      <div class="card-title">三层路由分布</div>
+      <div id="router-info" style="font-size:0.8rem;margin-bottom:0.3rem;">等待数据...</div>
+      <div class="router-bar" id="router-bar"></div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div>规则层</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>RL策略层</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>LLM兜底层</div>
+      </div>
+    </div>
+
+    <div class="card full">
+      <div class="card-title">20种教学策略</div>
+      <div class="strategy-grid" id="strategy-grid"></div>
+    </div>
+
+    <div class="card panel">
+      <div class="card-title">进化规则库</div>
+      <div class="rule-list" id="rule-list"></div>
+    </div>
+    <div class="card panel">
+      <div class="card-title">系统控制</div>
+      <div style="font-size:0.8rem;color:#94a3b8;margin-bottom:0.5rem;">
+        触发训练、保存检查点、查看策略详情
+      </div>
+      <div class="controls">
+        <button class="primary" onclick="doTrain()">触发训练</button>
+        <button onclick="doSave()">保存检查点</button>
+        <button onclick="loadStats()">刷新数据</button>
+      </div>
+      <div id="action-result" style="margin-top:0.5rem;font-size:0.75rem;color:#64748b;"></div>
+    </div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:8003';
+    let strategies = {};
+
+    async function loadStats() {
+      try {
+        const r = await fetch(`${API}/api/stats`);
+        const d = await r.json();
+        document.getElementById('v-steps').textContent = d.step_count || 0;
+        document.getElementById('v-trains').textContent = d.train_count || 0;
+        document.getElementById('v-best').textContent = (d.best_reward || 0).toFixed(2);
+        document.getElementById('v-rules').textContent = d.rules_count || 0;
+
+        const rs = d.router_stats || {};
+        const total = rs.total_decisions || 1;
+        document.getElementById('router-info').textContent =
+          `规则: ${rs.rule||0} (${(rs.rule_pct||0).toFixed(0)}%) | RL: ${rs.rl||0} (${(rs.rl_pct||0).toFixed(0)}%) | LLM: ${rs.llm||0} (${(rs.llm_pct||0).toFixed(0)}%)`;
+
+        const bar = document.getElementById('router-bar');
+        const rp = rs.rule_pct || 0, rlp = rs.rl_pct || 0, lp = rs.llm_pct || 0;
+        bar.innerHTML = `
+          <div class="router-seg rule" style="width:${rp}%">${rp>5?rp.toFixed(0)+'%':''}</div>
+          <div class="router-seg rl" style="width:${rlp}%">${rlp>5?rlp.toFixed(0)+'%':''}</div>
+          <div class="router-seg llm" style="width:${lp}%">${lp>5?lp.toFixed(0)+'%':''}</div>
+        `;
+      } catch(e) { console.error(e); }
+    }
+
+    async function loadRewardHistory() {
+      try {
+        const r = await fetch(`${API}/api/reward_history?limit=50`);
+        const d = await r.json();
+        const chart = document.getElementById('reward-chart');
+        chart.innerHTML = '';
+        const rewards = d.rewards || [];
+        const maxAbs = Math.max(...rewards.map(Math.abs), 1);
+        rewards.forEach(v => {
+          const bar = document.createElement('div');
+          bar.className = 'bar' + (v < 0 ? ' neg' : '');
+          bar.style.height = (Math.abs(v) / maxAbs * 100) + '%';
+          bar.title = `Reward: ${v.toFixed(2)}`;
+          chart.appendChild(bar);
+        });
+      } catch(e) { console.error(e); }
+    }
+
+    async function loadStrategies() {
+      try {
+        const r = await fetch(`${API}/api/strategies`);
+        const d = await r.json();
+        strategies = {};
+        d.strategies.forEach(s => strategies[s.id] = s);
+        const grid = document.getElementById('strategy-grid');
+        grid.innerHTML = d.strategies.map(s => `
+          <div class="strat-item" id="strat-${s.id}">
+            <div class="strat-id">${s.id}</div>
+            <div class="strat-name">${s.name_cn}</div>
+          </div>
+        `).join('');
+      } catch(e) { console.error(e); }
+    }
+
+    async function loadRules() {
+      try {
+        const r = await fetch(`${API}/api/rules`);
+        const d = await r.json();
+        const list = document.getElementById('rule-list');
+        if (d.rules.length === 0) {
+          list.innerHTML = '<div style="color:#64748b;font-size:0.75rem;">暂无规则，系统将通过自反思自动提取</div>';
+          return;
+        }
+        list.innerHTML = d.rules.map(r => `
+          <div class="rule-item">
+            <span class="rule-cond">IF ${r.condition}</span>
+            <span class="rule-then"> → 策略${r.strategy}(${r.strategy_name_cn}) 置信度:${r.confidence.toFixed(2)} 使用:${r.usage_count}次</span>
+          </div>
+        `).join('');
+      } catch(e) { console.error(e); }
+    }
+
+    async function doTrain() {
+      try {
+        const r = await fetch(`${API}/api/train`, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        const d = await r.json();
+        document.getElementById('action-result').textContent = JSON.stringify(d);
+        loadStats();
+      } catch(e) { document.getElementById('action-result').textContent = 'Error: ' + e.message; }
+    }
+
+    async function doSave() {
+      try {
+        const r = await fetch(`${API}/api/save?tag=manual`, {method:'POST'});
+        const d = await r.json();
+        document.getElementById('action-result').textContent = JSON.stringify(d);
+      } catch(e) { document.getElementById('action-result').textContent = 'Error: ' + e.message; }
+    }
+
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws/events`);
+      ws.onopen = () => { document.getElementById('ws-status').textContent='WS 已连接'; document.getElementById('ws-status').className='badge on'; };
+      ws.onmessage = (ev) => {
+        const p = JSON.parse(ev.data);
+        if (p.type === 'episode_complete') {
+          loadStats(); loadRewardHistory(); loadRules();
+          const sid = p.data.strategy;
+          document.querySelectorAll('.strat-item').forEach(el => el.classList.remove('active'));
+          const el = document.getElementById(`strat-${sid}`);
+          if (el) el.classList.add('active');
+        }
+      };
+      ws.onclose = () => { document.getElementById('ws-status').textContent='WS 未连接'; document.getElementById('ws-status').className='badge off'; setTimeout(connectWS, 3000); };
+    }
+
+    loadStats(); loadRewardHistory(); loadStrategies(); loadRules(); connectWS();
+    setInterval(() => { loadStats(); loadRewardHistory(); loadRules(); }, 10000);
+  </script>
+</body>
+</html>

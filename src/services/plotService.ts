@@ -128,13 +128,13 @@ export function generatePlotParams(
   type: keyof typeof DISCONTINUITY_EXAMPLES,
   customFunction?: string
 ): Record<string, string> {
-  const config = DISCONTINUITY_EXAMPLES[type];
-  
+  const config = DISCONTINUITY_EXAMPLES[type] as Record<string, string>;
+
   return {
-    function: customFunction || config.function,
-    x_range: config.xRange,
+    function: customFunction || config.function || '',
+    x_range: config.xRange || '',
     y_range: config.yRange || '',
-    title: config.title,
+    title: config.title || '',
     special_points: config.specialPoints || '',
     discontinuity_info: config.discontinuityInfo || '',
     piecewise_def: config.piecewiseDef || ''

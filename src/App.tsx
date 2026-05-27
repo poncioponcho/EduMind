@@ -3,32 +3,72 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { AppSkeleton } from '@/components/Skeleton';
 import { LandingPage } from '@/pages/LandingPage';
 import { DiagnosisPage } from '@/pages/DiagnosisPage';
 import { TeachingPage } from '@/pages/TeachingPage';
 import { PathPage } from '@/pages/PathPage';
 import { ReportPage } from '@/pages/ReportPage';
 import { AdminPage } from '@/pages/AdminPage';
+import { EvolvePage } from '@/pages/EvolvePage';
 import { createUser, getCurrentUser } from '@/services/database';
 import { initUserLearning } from '@/services/agentService';
+import { initMockMode, IS_MOCK_MODE } from '@/config';
 import type { User } from '@/types';
 
-type Page = 'landing' | 'diagnosis' | 'teaching' | 'path' | 'report' | 'admin';
+type Page = 'landing' | 'diagnosis' | 'teaching' | 'path' | 'report' | 'admin' | 'evolve';
 
-function App() {
+function MockBanner() {
+  const [visible, setVisible] = useState(true);
+
+  if (!IS_MOCK_MODE || !visible) return null;
+
+  return (
+    <div className="bg-yellow-500/10 border-b border-yellow-500/20 px-4 py-2 flex items-center justify-center gap-3 text-sm">
+      <span className="text-yellow-400 font-medium">
+        ⚠️ 演示模式：知识诊断引擎为模拟数据。完整功能需启动后端服务。
+      </span>
+      <a
+        href="https://github.com/poncioponcho/EduMind#本地部署"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-cyan-400 underline text-xs hover:text-cyan-300"
+      >
+        部署说明
+      </a>
+      <button
+        onClick={() => setVisible(false)}
+        className="text-muted-foreground hover:text-white text-xs ml-2"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('landing');
   const [user, setUser] = useState<User | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [username, setUsername] = useState('');
   const [navigateTo, setNavigateTo] = useState<Page | null>(null);
+  const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
-    const existing = getCurrentUser();
-    if (existing) {
-      setUser(existing);
-      initUserLearning(existing.id);
-    }
+    const init = async () => {
+      await initMockMode();
+      const existing = getCurrentUser();
+      if (existing) {
+        setUser(existing);
+        initUserLearning(existing.id);
+      }
+      setAppReady(true);
+    };
+    init();
   }, []);
+
+  if (!appReady) return <AppSkeleton />;
 
   const handleLogin = () => {
     if (!username.trim()) return;
@@ -67,36 +107,26 @@ function App() {
         return user ? (
           <DiagnosisPage
             user={user}
-            onComplete={() => {
-              // 诊断完成后可以跳转到教学或路径
-              setCurrentPage('teaching');
-            }}
+            onComplete={() => setCurrentPage('teaching')}
             onNavigate={setCurrentPage}
           />
         ) : null;
       case 'teaching':
         return user ? (
-          <TeachingPage
-            user={user}
-            onNavigate={setCurrentPage}
-          />
+          <TeachingPage user={user} onNavigate={setCurrentPage} />
         ) : null;
       case 'path':
         return user ? (
-          <PathPage
-            user={user}
-            onNavigate={setCurrentPage}
-          />
+          <PathPage user={user} onNavigate={setCurrentPage} />
         ) : null;
       case 'report':
         return user ? (
-          <ReportPage
-            user={user}
-            onNavigate={setCurrentPage}
-          />
+          <ReportPage user={user} onNavigate={setCurrentPage} />
         ) : null;
       case 'admin':
         return <AdminPage onBack={() => setCurrentPage('landing')} />;
+      case 'evolve':
+        return <EvolvePage onNavigate={setCurrentPage} />;
       default:
         return <LandingPage onStart={() => requireAuth('diagnosis')} onViewPath={() => requireAuth('path')} onViewReport={() => requireAuth('report')} onAdmin={() => setCurrentPage('admin')} user={user} />;
     }
@@ -104,7 +134,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* 顶部导航 */}
+      <MockBanner />
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <button
@@ -144,6 +174,12 @@ function App() {
                 >
                   报告
                 </button>
+                <button
+                  onClick={() => setCurrentPage('evolve')}
+                  className={`px-3 py-1.5 rounded-md transition-colors ${currentPage === 'evolve' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-white'}`}
+                >
+                  🧬进化
+                </button>
               </div>
             )}
 
@@ -167,12 +203,10 @@ function App() {
         </div>
       </nav>
 
-      {/* 主内容 */}
       <main className="pt-14">
         {renderPage()}
       </main>
 
-      {/* 登录对话框 */}
       <Dialog open={showLogin} onOpenChange={setShowLogin}>
         <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
@@ -205,6 +239,14 @@ function App() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }
 

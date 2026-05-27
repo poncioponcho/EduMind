@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getAgentStates, subscribeToAgentStates, subscribeToAgentMessages } from '@/services/agentService';
 import { getAgentLogs } from '@/services/database';
+import { MCPToolsPanel } from '@/components/MCPToolsPanel';
 import type { AgentState, AgentMessage } from '@/types';
 import { Activity, Cpu, MessageSquare, Terminal, Zap, Server, Wifi, WifiOff } from 'lucide-react';
 
@@ -14,7 +15,7 @@ export function AdminPage({ onBack }: AdminPageProps) {
   const [agents, setAgents] = useState<AgentState[]>(getAgentStates());
   const [logs, setLogs] = useState<AgentMessage[]>([]);
   const [isConnected] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'logs' | 'architecture'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'logs' | 'architecture' | 'mcp'>('overview');
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,6 +93,7 @@ export function AdminPage({ onBack }: AdminPageProps) {
           { id: 'overview' as const, label: '总览', icon: Activity },
           { id: 'logs' as const, label: '通信日志', icon: MessageSquare },
           { id: 'architecture' as const, label: '架构图', icon: Server },
+          { id: 'mcp' as const, label: 'MCP工具', icon: Zap },
         ].map(tab => (
           <button
             key={tab.id}
@@ -343,6 +345,12 @@ export function AdminPage({ onBack }: AdminPageProps) {
               </div>
             </div>
           </Card>
+        </div>
+      )}
+
+      {activeTab === 'mcp' && (
+        <div className="space-y-6">
+          <MCPToolsPanel />
         </div>
       )}
     </div>

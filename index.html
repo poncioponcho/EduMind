@@ -1,9 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EduMind</title>
+    <title>EduMind - AI自适应教学系统</title>
+    <meta name="description" content="EduMind: 基于多Agent协作的AI自适应教学系统，支持认知诊断、知识图谱、自进化策略" />
+    <script>
+      // Handle SPA redirect from 404.html on GitHub Pages
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        var redirect = params.get('redirect');
+        if (redirect) {
+          params.delete('redirect');
+          var clean = params.toString();
+          var newUrl = window.location.origin + window.location.pathname + redirect;
+          if (clean) newUrl += '?' + clean;
+          if (window.location.hash) newUrl += window.location.hash;
+          window.history.replaceState(null, '', newUrl);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
